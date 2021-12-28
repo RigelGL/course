@@ -7,13 +7,14 @@ class Value:
     Значение, которое имеет переменные и/или постоянные затрты
     Может иметь потомков
     """
-    __slots__ = ['name', '_const', '_variable', 'children']
+    __slots__ = ['name', '_const', '_variable', 'children', '_display_name']
 
-    def __init__(self, name: str, const: float = 0, variable: float = 0):
+    def __init__(self, name: str, const: float = 0, variable: float = 0, display_name: str = None):
         self.name = name
         self._const = const
         self._variable = variable
         self.children = None
+        self._display_name = display_name
 
     def add_child(self, variable):
         """
@@ -57,15 +58,40 @@ class Value:
         """
         return self.const + self.variable
 
+    def head(self, deep: int = 0):
+        if deep == 0 or self.children is None:
+            return Value(self.name, self.const, self.variable)
+        else:
+            nc = Value(self.name, display_name=self._display_name)
+            for e in self.children:
+                nc.add_child(e.head(deep - 1))
+            return nc
+
+    def __getitem__(self, item):
+        if type(item) is not str:
+            return None
+        if self.children is None:
+            if item == self.name:
+                return self
+            return None
+        for e in self.children:
+            if e.name == item:
+                return e
+        for e in self.children:
+            r = e[item]
+            if r:
+                return r
+        return None
+
     def __str__(self, deep=0):
         c = self.const
         v = self.variable
         if c > 0 and v > 0:
-            s = '  ' * deep + '{}, постоянные: {:,.2f}, переменные: {:,.2f}, все: {:,.2f}'.format(self.name, c, v, c + v)
+            s = '  ' * deep + '{}, постоянные: {:,.2f}, переменные: {:,.2f}, все: {:,.2f}'.format(self._display_name if self._display_name else self.name, c, v, c + v)
         elif c == 0:
-            s = '  ' * deep + '{}, переменные: {:,.2f}'.format(self.name, v)
+            s = '  ' * deep + '{}, переменные: {:,.2f}'.format(self._display_name if self._display_name else self.name, v)
         else:
-            s = '  ' * deep + '{}, постоянные: {:,.2f}'.format(self.name, c)
+            s = '  ' * deep + '{}, постоянные: {:,.2f}'.format(self._display_name if self._display_name else self.name, c)
         if self.children is not None:
             for child in self.children:
                 s += '\n' + child.__str__(deep + 1)
@@ -200,11 +226,12 @@ class PercentTable:
 
 
 class _PerPercentTableRow:
-    __slots__ = ['name', 'percent']
+    __slots__ = ['name', 'percent', 'data']
 
-    def __init__(self, name, percent):
+    def __init__(self, name, percent, data=None):
         self.name = name
         self.percent = percent
+        self.data = data
 
 
 class PerPercentTable:
@@ -227,17 +254,15 @@ class PerPercentTable:
         self._normalize = normalize
         self._rows_map: dict = {}
 
-    def add_row(self, name: str, percent: float):
+    def add_row(self, name: str, percent: float, data=None):
         if name in self._rows_map.keys():
             print('error, double value', name)
             return
         percent /= 100.0
-        r = _PerPercentTableRow(name, percent)
+        r = _PerPercentTableRow(name, percent, data)
         self.rows.append(r)
         self._rows_map[name] = r
         self._total_percent += percent
-
-
 
     @property
     def total(self):
@@ -253,18 +278,47 @@ class PerPercentTable:
             total += v
         return total
 
+    def calc_sum(self, callback):
+        s = 0
+        for row in self.rows:
+            np = row.percent / self._total_percent if self._normalize else row.percent
+            v = np * self._initial_value
+            if type(self._initial_value) == int:
+                v = max(1 if self._minimum_is_one else 0, round(v))
+            s += callback(v, row.data)
+        return s
+
     def __str__(self):
         t = texttable.Texttable(max_width=200)
-        t.set_cols_dtype([str] * 3)
-        t.header(['name', 'percent', 'value'])
+        t.set_cols_dtype([str] * 4)
+        t.header(['name', 'percent', 'value', 'data'])
         total = 0
+
         for i in self.rows:
             np = i.percent / self._total_percent if self._normalize else i.percent
             v = np * self._initial_value
             if type(self._initial_value) == int:
                 v = max(1 if self._minimum_is_one else 0, round(v))
             total += v
-            t.add_row([i.name, '{:.2f}'.format(np * 100), ('{:,.2f}' if type(self._initial_value) == float else '{:,}').format(v)])
+            t.add_row([i.name, '{:.2f}'.format(np * 100), ('{:,.2f}' if type(self._initial_value) == float else '{:,}').format(v), str(i.data)])
         t.add_row(['total', 100.0 if self._normalize else self._total_percent,
-                   ('{:,.2f}' if type(self._initial_value) == float else '{:,}').format(total)])
+                   ('{:,.2f}' if type(self._initial_value) == float else '{:,}').format(total), ''])
+        return t.draw()
+
+
+class CalculateTable:
+    """
+    Вычисляет значения результата по массиву переданных аргументов и callback функции
+    """
+    __slots__ = ['input_data', 'output_data', 'callback']
+
+    def __init__(self, input_data: List, callback):
+        self.input_data = input_data
+        self.callback = callback
+        self.output_data = [callback(e) for e in input_data]
+
+    def __str__(self):
+        t = texttable.Texttable(max_width=200)
+        t.header([str(e) for e in self.input_data])
+        t.add_row([str(e) for e in self.output_data])
         return t.draw()
