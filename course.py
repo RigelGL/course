@@ -60,7 +60,7 @@ class Value:
 
     def head(self, deep: int = 0):
         if deep == 0 or self.children is None:
-            return Value(self.name, self.const, self.variable)
+            return Value(self.name, self.const, self.variable, self._display_name)
         else:
             nc = Value(self.name, display_name=self._display_name)
             for e in self.children:
@@ -110,6 +110,9 @@ class _TableRow:
     def __init__(self, table, data):
         self.table = table
         self.data = data
+
+    def __len__(self):
+        return len(self.data)
 
     def __getitem__(self, item):
         if type(item) == int:
@@ -181,6 +184,9 @@ class Table:
             s += callback(i)
         return s
 
+    def __len__(self):
+        return len(self.rows)
+
     def __str__(self):
         t = texttable.Texttable(max_width=200)
         t.header(self.headers)
@@ -226,12 +232,17 @@ class PercentTable:
 
 
 class _PerPercentTableRow:
-    __slots__ = ['name', 'percent', 'data']
+    __slots__ = ['name', 'percent', 'data', '_per_percent_table']
 
-    def __init__(self, name, percent, data=None):
+    def __init__(self, name, percent, per_percent_table, data=None, ):
         self.name = name
         self.percent = percent
         self.data = data
+        self._per_percent_table = per_percent_table
+
+    @property
+    def amount(self):
+        return self._per_percent_table._get_amount(self.percent)
 
 
 class PerPercentTable:
@@ -258,8 +269,7 @@ class PerPercentTable:
         if name in self._rows_map.keys():
             print('error, double value', name)
             return
-        percent /= 100.0
-        r = _PerPercentTableRow(name, percent, data)
+        r = _PerPercentTableRow(name, percent, self, data)
         self.rows.append(r)
         self._rows_map[name] = r
         self._total_percent += percent
@@ -278,6 +288,13 @@ class PerPercentTable:
             total += v
         return total
 
+    def _get_amount(self, percent):
+        np = percent / self._total_percent if self._normalize else percent
+        v = np * self._initial_value
+        if type(self._initial_value) == int:
+            v = max(1 if self._minimum_is_one else 0, round(v))
+        return v
+
     def calc_sum(self, callback):
         s = 0
         for row in self.rows:
@@ -287,6 +304,9 @@ class PerPercentTable:
                 v = max(1 if self._minimum_is_one else 0, round(v))
             s += callback(v, row.data)
         return s
+
+    def __len__(self):
+        return len(self.rows)
 
     def __str__(self):
         t = texttable.Texttable(max_width=200)
@@ -317,8 +337,99 @@ class CalculateTable:
         self.callback = callback
         self.output_data = [callback(e) for e in input_data]
 
+    @property
+    def items(self):
+        return zip(self.input_data, self.output_data)
+
     def __str__(self):
         t = texttable.Texttable(max_width=200)
         t.header([str(e) for e in self.input_data])
         t.add_row([str(e) for e in self.output_data])
         return t.draw()
+
+
+class ActivePassive:
+    __slots__ = [
+        'NMA', 'OS',
+        'K_ob_sr_pr_zap', 'K_ob_nez_pr', 'K_ob_got_prod', 'K_ob_RBP', 'K_ob_extra', 'debitor_dolg', 'K_ob_ds',
+        'ustavnoy_kapital', 'dobavochniy_kapital', 'reservniy_kapital', 'neraspred_pribil',
+        'doldosroch_zaemn_sredstva',
+        'kratkosroch_zaem_sredstva', 'kratkosroch_prochee'
+    ]
+
+    def __init__(self):
+        self.NMA = 0
+        self.OS = 0
+        self.K_ob_sr_pr_zap = 0
+        self.K_ob_nez_pr = 0
+        self.K_ob_got_prod = 0
+        self.K_ob_RBP = 0
+        self.K_ob_extra = 0
+        self.debitor_dolg = 0
+        self.K_ob_ds = 0
+        self.ustavnoy_kapital = 0
+        self.dobavochniy_kapital = 0
+        self.reservniy_kapital = 0
+        self.neraspred_pribil = 0
+        self.doldosroch_zaemn_sredstva = 0
+        self.kratkosroch_zaem_sredstva = 0
+        self.kratkosroch_prochee = 0
+
+    @property
+    def r1(self):
+        return self.NMA + self.OS
+
+    @property
+    def r_K_ob_zap(self):
+        return self.K_ob_sr_pr_zap + self.K_ob_nez_pr + self.K_ob_got_prod + self.K_ob_RBP + self.K_ob_extra
+
+    @property
+    def r2(self):
+        return self.r_K_ob_zap + self.debitor_dolg + self.K_ob_ds
+
+    @property
+    def r3(self):
+        return self.ustavnoy_kapital + self.dobavochniy_kapital + self.reservniy_kapital + self.neraspred_pribil
+
+    @property
+    def r4(self):
+        return self.doldosroch_zaemn_sredstva
+
+    @property
+    def r5(self):
+        return self.kratkosroch_zaem_sredstva + self.kratkosroch_prochee
+
+    @property
+    def active(self):
+        return self.r1 + self.r2
+
+    @property
+    def passive(self):
+        return self.r3 + self.r4 + self.r5
+
+    def to_table(self):
+        return [
+            ['1. Внеоборотные активы', None, '3. Капитал и резервы', None],
+            ['Нематериальные активы', self.NMA, 'Уставный капитал', self.ustavnoy_kapital],
+            ['Основные средства', self.OS, 'Добавочный капитал', self.dobavochniy_kapital],
+            [None, None, 'Резервный капитал', self.reservniy_kapital],
+            [None, None, 'Нераспределенная прибыль (непокрытый убыток)', self.neraspred_pribil],
+            ['Итого по разделу 1', self.r1, 'Итого по разделу 3', self.r3],
+            [None, None, None, None],
+
+            ['2. Оборотные активы', None, '4. Долгосрочные обязательства', None],
+            ['Запасы', self.r_K_ob_zap, '', None],
+            [' сырье и материалы', self.K_ob_sr_pr_zap, 'Итого по 4 разделу', self.r4],
+            [' затраты в незавершенном производстве', self.K_ob_nez_pr, '', None],
+            [' готовая продукция и товары для перепродажи', self.K_ob_got_prod, '5. Краткосрочные обязательства', None],
+            [' расходы будущих периодов', self.K_ob_RBP, 'Заемные средства', self.kratkosroch_zaem_sredstva],
+            [' прочие запасы и затраты', self.K_ob_extra, 'Прочие обязательства', self.kratkosroch_prochee],
+            ['Дебиторская задолженность', self.debitor_dolg, '', None],
+            ['Денежные средства', self.K_ob_ds, '', None],
+            [None, None, None, None],
+            ['Итого по разделу 2', self.r2, 'Итого по разделу 5', self.r5],
+            [None, None, None, None],
+            ['Баланс', self.active, 'Баланс', self.passive],
+        ]
+
+
