@@ -355,13 +355,6 @@ def gen_1_3():
 
 
 def gen_1_4():
-    def calc_n(n):
-        fake_initial = InitialData(n)
-        fake_chapter_2 = Chapter_2(fake_initial, chapter_1, chapter_2.FOT)
-        fake_chapter_3 = Chapter_3(fake_initial, chapter_1, fake_chapter_2, const=chapter_3.costs)
-        fake_chapter_4 = Chapter_4(fake_initial, fake_chapter_3, chapter_4.S_kom)
-        return fake_chapter_4.S_B_sum.head()
-
     dp('4. Расчет себестоимости изделия Б, величины условно-постоянных и переменных затрат', title_text)
     dp('Рассчитаем производственную и полную себестоимости изделия Б')
 
@@ -374,7 +367,7 @@ def gen_1_4():
     dp('Полную себестоимость определим по формуле:')
     add_formula(
         'S_{Б\\ полн} = \\frac{S_{пр.тек.пл.} + S_{ком}}{N_{пл}} = \\frac{S_{Б сум}}{N_{пл}} = \\frac{' +
-        f'{fn(chapter_4.S_B_sum.total)} }}{{ {fn(initial_data.N_pl)} }} = {fn(chapter_4.S_b_poln.total)}\\ [руб./шт.]')
+        f'{fn(chapter_4.S_sum.total)} }}{{ {fn(initial_data.N_pl)} }} = {fn(chapter_4.S_b_poln.total)}\\ [руб./шт.]')
     dp('Коммерческие затраты связаны с реализацией продукции, включают расходы на тару и упаковку изделий на складах готовой продукции; расходы по '
        'доставке продукции на станцию отправления; комиссионные сборы (отчисления), уплачиваемые сбытовым и другим посредническим предприятиям; '
        'расходы по содержанию помещений для хранения продукции в местах ее реализации; рекламные и представительские расходы)')
@@ -386,7 +379,7 @@ def gen_1_4():
 
     dp('Таблица 4.3.1, условно-постоянные и переменные затраты', table_name_text)
     table = add_table([
-        [f'Суммарные затраты, руб./год: {fn(chapter_4.S_B_sum.total)}', None, None, None, None, None],
+        [f'Суммарные затраты, руб./год: {fn(chapter_4.S_sum.total)}', None, None, None, None, None],
         ['№', 'Условно-постоянные затраты', 'Сумма, тыс.руб./год', '№', 'Переменные затраты', 'Сумма, тыс.руб./год']
     ], [Cm(1), Cm(4.5), Cm(3), Cm(1), Cm(4.5), Cm(3)], style=table_style_12)
     table.cell(0, 0).merge(table.cell(0, 5))
@@ -432,10 +425,9 @@ def gen_1_4():
     r.cells[3].merge(r.cells[4]).paragraphs[0].add_run('Итого').bold = True
     r.cells[5].paragraphs[0].add_run(fn(sum([e[1] for e in variable])))
 
-    add_formula('S_{Б\\ сум} = S_{пост} + S_{перем} = ' + f'{fn(chapter_4.S_B_sum.total)}')
+    add_formula('S_{Б\\ сум} = S_{пост} + S_{перем} = ' + f'{fn(chapter_4.S_sum.total)}')
 
-    N_pl_values = [450, 2700, 7200, 18900, 33750, 45000]
-    ct1 = CalculateTable(N_pl_values, calc_n)
+    ct1 = chapter_4.ct1
 
     S_const_costs = [e.const for e in ct1.output_data]
     S_variable_costs = [e.variable for e in ct1.output_data]
@@ -649,7 +641,7 @@ def gen_1_7():
     dp('Прибыль от реализации = прибыль до налогообложения:')
 
     add_formula('П_{реал} = \\frac{П_{чист}}{' + f'{fn(1 - chapter_7.tax)} }} = {fn(chapter_7.profit_before_tax)}\\ [тыс.руб/год]')
-    add_formula('k_{нац} = \\frac{' + f'{fn(chapter_7.profit_before_tax)} }}{{ {fn(chapter_4.S_B_sum.total)} }} = {fn(chapter_7.k_nats)}')
+    add_formula('k_{нац} = \\frac{' + f'{fn(chapter_7.profit_before_tax)} }}{{ {fn(chapter_4.S_sum.total)} }} = {fn(chapter_7.k_nats)}')
     add_formula(
         'Ц_{Б_{полн.(пл)}} = ' +
         f'{fn(chapter_4.S_b_poln.total)} \\cdot (1 + {fn(chapter_7.k_nats)}) = {fn(chapter_7.P_b_poln)}\\ [руб.]')
@@ -661,7 +653,7 @@ def gen_1_7():
     add_formula(
         'Ц_{Б_{перем.(пл)}} = ' +
         f'{fn(chapter_4.S_b_poln.variable)} (1 + \\frac{{ {fn(chapter_7.profit_before_tax)} + '
-        f'{fn(chapter_4.S_B_sum.const)} }}{{ {fn(chapter_4.S_B_sum.variable)} }}) = {fn(chapter_7.P_b_perem)}\\ [руб.]')
+        f'{fn(chapter_4.S_sum.const)} }}{{ {fn(chapter_4.S_sum.variable)} }}) = {fn(chapter_7.P_b_perem)}\\ [руб.]')
 
     dp('Цены должны быть одинаковыми, если не округлять до копеек дельные затраты и коэффициент наценки. При вычислении использованы более точные цифры, '
        'чем те, которые указаны в уравнении, поэтому разница минимальна, или отстутсвует вовсе.')

@@ -70,9 +70,9 @@ class Value:
     def __getitem__(self, item):
         if type(item) is not str:
             return None
+        if item == self.name:
+            return self
         if self.children is None:
-            if item == self.name:
-                return self
             return None
         for e in self.children:
             if e.name == item:
@@ -330,12 +330,17 @@ class CalculateTable:
     """
     Вычисляет значения результата по массиву переданных аргументов и callback функции
     """
-    __slots__ = ['input_data', 'output_data', 'callback']
+    __slots__ = ['input_data', 'output_data', 'callback', 'context']
 
-    def __init__(self, input_data: List, callback):
+    def __init__(self, input_data: List, callback, context=None):
         self.input_data = input_data
         self.callback = callback
-        self.output_data = [callback(e) for e in input_data]
+        self.context = context
+        if context is None:
+            self.output_data = [callback(e) for e in input_data]
+        else:
+            self.output_data = [callback(context, e) for e in input_data]
+
 
     @property
     def items(self):
