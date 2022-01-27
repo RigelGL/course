@@ -1,11 +1,14 @@
 import latex2mathml.converter
 import numpy as np
 import math
+
+from docx.oxml import ns
 from lxml import etree
 import matplotlib
 from matplotlib import pyplot as plt
 from io import BytesIO
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.shared import Inches, Mm, Cm, Pt, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_BREAK
 from docx.enum.style import WD_STYLE_TYPE
@@ -13,10 +16,6 @@ from course import Table, Value, PerPercentTable, CalculateTable, ActivePassive
 
 # formatting
 document = Document()
-FONT_NAME = 'Times New Roman'
-title_size = Pt(16)
-text_size = Pt(14)
-first_line_indent = Cm(1.25)
 
 title_text = None
 subtitle_text = None
@@ -25,6 +24,7 @@ table_name_text = None
 formula_style = None
 formula_style_12 = None
 table_style = None
+table_style_dense = None
 table_style_12 = None
 table_style_12_dense = None
 table_style_10 = None
@@ -32,91 +32,61 @@ table_style_10 = None
 
 def init_styles():
     global main_text, title_text, table_name_text, subtitle_text, \
-        formula_style, formula_style_12, table_style, table_style_12, table_style_12_dense, table_style_10
+        formula_style, formula_style_12, table_style, table_style_dense, \
+        table_style_12, table_style_12_dense, table_style_10
+    FONT_NAME = 'Times New Roman'
 
-    main_text = document.styles.add_style('Main text', WD_STYLE_TYPE.PARAGRAPH)
-    main_text.paragraph_format.first_line_indent = Cm(1.25)
-    main_text.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-    main_text.font.name = FONT_NAME
-    main_text.font.size = Pt(14)
-    main_text.font.bold = False
-    main_text.next_paragraph_style = main_text
+    def gen_paragraph_style(name, font_size, first_line_indent=0, space_before=0, space_after=0, alignment=WD_PARAGRAPH_ALIGNMENT.LEFT, base=None):
+        ps = document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        if base is not None:
+            ps.base_style = base
+        ps.paragraph_format.first_line_indent = first_line_indent
+        ps.paragraph_format.alignment = alignment
+        ps.font.name = FONT_NAME
+        ps.font.size = font_size
+        ps.paragraph_format.space_before = space_before
+        ps.paragraph_format.space_after = space_after
+        ps.font.bold = False
+        return ps
 
-    subtitle_text = document.styles.add_style('Subtitle text', WD_STYLE_TYPE.PARAGRAPH)
-    subtitle_text.base_style = document.styles['Heading 2']
-    subtitle_text.font.name = FONT_NAME
-    subtitle_text.font.size = Pt(14)
-    subtitle_text.font.bold = False
-    subtitle_text.paragraph_format.space_after = Pt(8)
-    subtitle_text.next_paragraph_style = main_text
+    def gen_table_style(name, font_size, left_indent=None, right_indent=None, space_before=0, space_after=0):
+        ts = document.styles.add_style(name, WD_STYLE_TYPE.TABLE)
+        ts.base_style = document.styles['Table Grid']
+        if left_indent is not None:
+            ts.paragraph_format.left_indent = left_indent
+        if right_indent is not None:
+            ts.paragraph_format.right_indent = right_indent
+        ts.paragraph_format.space_before = space_before
+        ts.paragraph_format.space_after = space_after
+        ts.font.name = FONT_NAME
+        ts.font.size = font_size
+        ts.next_paragraph_style = main_text
+        return ts
 
-    title_text = document.styles.add_style('Title text', WD_STYLE_TYPE.PARAGRAPH)
-    title_text.base_style = document.styles['Heading 1']
-    title_text.font.name = FONT_NAME
-    title_text.font.size = Pt(16)
-    title_text.font.bold = False
-    title_text.paragraph_format.space_after = Pt(12)
-    title_text.next_paragraph_style = subtitle_text
+    title_text = gen_paragraph_style('Title text', Pt(16), space_after=Pt(12), base=document.styles['Heading 1'])
+    subtitle_text = gen_paragraph_style('Subtitle text', Pt(14), space_after=Pt(8), base=document.styles['Heading 2'])
+    main_text = gen_paragraph_style('Main text', Pt(14), Cm(1.25), alignment=WD_PARAGRAPH_ALIGNMENT.JUSTIFY)
 
-    table_name_text = document.styles.add_style('Table name text', WD_STYLE_TYPE.PARAGRAPH)
-    table_name_text.base_style = document.styles['Main text']
-    table_name_text.paragraph_format.first_line_indent = Cm(0)
-    table_name_text.paragraph_format.space_before = Pt(12)
-    table_name_text.paragraph_format.space_after = Pt(4)
-    table_name_text.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    table_name_text.font.size = Pt(12)
+    table_name_text = gen_paragraph_style('Table name text', Pt(12), space_before=Pt(12), space_after=Pt(4), alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
 
-    formula_style = document.styles.add_style('Formula style', WD_STYLE_TYPE.PARAGRAPH)
-    formula_style.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-    formula_style.font.name = FONT_NAME
-    formula_style.font.size = Pt(14)
-    formula_style.font.bold = False
+    formula_style = gen_paragraph_style('Formula style', Pt(14))
+    formula_style_12 = gen_paragraph_style('Formula style 12', Pt(12))
 
-    formula_style_12 = document.styles.add_style('Formula style 12', WD_STYLE_TYPE.PARAGRAPH)
-    formula_style_12.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-    formula_style_12.font.name = FONT_NAME
-    formula_style_12.font.size = Pt(12)
-    formula_style_12.font.bold = False
-
-    table_style = document.styles.add_style('Table style', WD_STYLE_TYPE.TABLE)
-    table_style.base_style = document.styles['Table Grid']
-    table_style.paragraph_format.space_before = Mm(1.5)
-    table_style.paragraph_format.space_after = Mm(1.5)
-    table_style.font.name = FONT_NAME
-    table_style.font.size = Pt(14)
-    table_style.next_paragraph_style = main_text
-
-    table_style_12 = document.styles.add_style('Table style 12', WD_STYLE_TYPE.TABLE)
-    table_style_12.base_style = document.styles['Table Grid']
-    table_style_12.paragraph_format.space_before = Mm(1.5)
-    table_style_12.paragraph_format.space_after = Mm(1.5)
-    table_style_12.font.name = FONT_NAME
-    table_style_12.font.size = Pt(12)
-    table_style_12.next_paragraph_style = main_text
-
-    table_style_12_dense = document.styles.add_style('Table style 12 dense', WD_STYLE_TYPE.TABLE)
-    table_style_12_dense.base_style = document.styles['Table Grid']
-    table_style_12_dense.paragraph_format.left_indent = Mm(0.25)
-    table_style_12_dense.paragraph_format.right_indent = Mm(0.25)
-    table_style_12_dense.paragraph_format.space_before = Mm(0.15)
-    table_style_12_dense.paragraph_format.space_after = Mm(0.15)
-    table_style_12_dense.font.name = FONT_NAME
-    table_style_12_dense.font.size = Pt(12)
-    table_style_12_dense.next_paragraph_style = main_text
-
-    table_style_10 = document.styles.add_style('Table style 10', WD_STYLE_TYPE.TABLE)
-    table_style_10.base_style = document.styles['Table Grid']
-    table_style_10.paragraph_format.space_before = Mm(1.0)
-    table_style_10.paragraph_format.space_after = Mm(1.0)
-    table_style_10.font.name = FONT_NAME
-    table_style_10.font.size = Pt(10)
-    table_style_10.next_paragraph_style = main_text
+    table_style = gen_table_style('Table style', Pt(14), space_before=Mm(1.5), space_after=Mm(1.5))
+    table_style = gen_table_style('Table style dense', Pt(14), space_before=Mm(0.5), space_after=Mm(0.5))
+    table_style_12 = gen_table_style('Table style 12', Pt(12), space_before=Mm(1.5), space_after=Mm(1.5))
+    table_style_12_dense = gen_table_style('Table style 12 dense', Pt(12), space_before=Mm(0.15), space_after=Mm(0.15), left_indent=Mm(0.25), right_indent=Mm(0.25))
+    table_style_10 = gen_table_style('Table style 10', Pt(10), space_before=Mm(1.0), space_after=Mm(1.0))
 
 
-def dp(text='', style=None):
+def dp(text='', style=None, no_indent=False):
     if style is None:
-        return document.add_paragraph(text, main_text)
-    return document.add_paragraph(text, style)
+        p = document.add_paragraph(text, main_text)
+    else:
+        p = document.add_paragraph(text, style)
+    if no_indent:
+        p.paragraph_format.first_line_indent = 0
+    return p
 
 
 def latex_to_word(latex_input):
@@ -152,6 +122,9 @@ def add_formula_with_description(latex, description, style=None):
 
 def add_table(data, widths=None, first_bold=False, style=None):
     table = document.add_table(rows=len(data), cols=len(data[0]))
+    if widths is not None:
+        table.autofit = False
+        table.allow_autofit = True
     if style is None:
         table.style = table_style
     else:
@@ -211,37 +184,80 @@ def fn(num, ln=2):
 
 
 class InitialData:
-    __slots__ = ['N_pl', 'materials', 'accessories', 'operations']
+    __slots__ = [
+        'N_pl',
+        'materials', 'accessories', 'operations',
+        'materials_A', 'accessories_A', 'operations_A',
+        'materials_B', 'accessories_B', 'operations_B',
+        'materials_C', 'accessories_C', 'operations_C',
+    ]
 
     def __init__(self, N_pl=45_000):
         self.N_pl = N_pl
-        self.materials = Table('name', 'cost', 'amount', 't_zap')
+        self.materials_B = self.materials = Table('name', 'cost', 'amount', 't_zap')
 
         self.materials.add_row('а', 60, 1, 30)
         self.materials.add_row('б', 150, 3, 40)
         self.materials.add_row('в', 350, 3, 60)
         self.materials.add_row('г', 60, 2, 50)
 
-        self.accessories = Table('name', 'cost', 'amount', 't_zap')
+        self.accessories_B = self.accessories = Table('name', 'cost', 'amount', 't_zap')
         self.accessories.add_row('а', 50, 1, 35)
         self.accessories.add_row('б', 60, 3, 70)
         self.accessories.add_row('в', 70, 2, 45)
 
-        self.operations = Table('cost', 'time', 'name')
+        self.operations_B = self.operations = Table('cost', 'time', 'name')
         self.operations.add_row(0, 0.4, '-ручная операция-')
-        self.operations.add_row(500_000, 0.3, 'а')
-        self.operations.add_row(600_000, 0.2, 'б')
-        self.operations.add_row(700_000, 0.6, 'в')
+        self.operations.add_row(500_000, 0.3, 'б')
+        self.operations.add_row(600_000, 0.2, 'в')
+        self.operations.add_row(700_000, 0.6, 'г')
+
+        self.materials_A = Table('name', 'cost', 'amount', 't_zap')
+        self.materials_A.add_row('-', 0, 0, 0)
+        self.materials_A.add_row('б', 50, 1, 30)
+        self.materials_A.add_row('в', 50, 8, 30)
+        self.materials_A.add_row('г', 15, 8, 30)
+
+        self.accessories_A = Table('name', 'cost', 'amount', 't_zap')
+        self.accessories_A.add_row('а', 0, 0, 0)
+        self.accessories_A.add_row('б', 70, 4, 30)
+        self.accessories_A.add_row('в', 40, 2, 30)
+
+        self.operations_A = Table('cost', 'time', 'name')
+        self.operations_A.add_row(1_200_000, 0.2, 'а')
+        self.operations_A.add_row(1_400_000, 0.1, 'б')
+        self.operations_A.add_row(1_500_000, 0.3, 'в')
+        self.operations_A.add_row(1_600_000, 0.5, 'г')
+        self.operations_A.add_row(1_700_000, 0.5, 'д')
+        self.operations_A.add_row(1_300_000, 1.0, 'е')
+        self.operations_A.add_row(0, 0.3, '-ручная операция-')
+
+        self.materials_C = Table('name', 'cost', 'amount', 't_zap')
+        self.materials_C.add_row('а', 35, 1, 30)
+        self.materials_C.add_row('б', 50, 1, 30)
+        self.materials_C.add_row('в', 0, 0, 30)
+        self.materials_C.add_row('г', 15, 4, 30)
+
+        self.accessories_C = Table('name', 'cost', 'amount', 't_zap')
+        self.accessories_C.add_row('а', 70, 1, 30)
+        self.accessories_C.add_row('б', 0, 0, 0)
+        self.accessories_C.add_row('в', 40, 2, 30)
+
+        self.operations_C = Table('cost', 'time', 'name')
+        self.operations_C.add_row(1_200_000, 0.2, 'а')
+        self.operations_C.add_row(1_400_000, 0.1, 'б')
+        self.operations_C.add_row(1_600_000, 1.0, 'г')
+        self.operations_C.add_row(1_700_000, 0.5, 'д')
 
 
 class Chapter_1:
     __slots__ = [
         'T_pl', 'B', 'C', 'D', 'O', 'H', 'gamma', 'F_ob_ef',
-        'N_machine_work_percent', 'n_ob_k_rasch', 'n_ob_k_fact', 'b_fact',
-        'TO_perv', 'main_resources', 'S_os', 'S_os_amortisable']
+        'N_machine_work_percent', 'machines',
+        'TO_perv', 'main_resources', 'S_os', 'S_os_amortisable'
+    ]
 
     def __init__(self, initial_data: InitialData):
-
         def calc_1_1_n_ob_k(N, t, b, F, ceil=True):
             numerator = N * t
             denominator = b * F
@@ -259,19 +275,18 @@ class Chapter_1:
         self.F_ob_ef = (self.T_pl - self.B) * self.C * self.D * (1 - self.gamma)
         self.N_machine_work_percent = 0.75
 
-        self.n_ob_k_rasch = []
-        self.n_ob_k_fact = []
-        self.b_fact = []
+        self.machines = Table('name', 'cost', 'n rasch', 'n fact', 'b_fact')
 
         self.TO_perv = 0
 
-        for operation in initial_data.operations.rows[1:]:
-            e = calc_1_1_n_ob_k(initial_data.N_pl, operation['time'], self.N_machine_work_percent, self.F_ob_ef, False)
-            self.n_ob_k_rasch.append(e)
-            e = math.ceil(e)
-            self.n_ob_k_fact.append(e)
-            self.b_fact.append(calc_1_1_n_ob_k(initial_data.N_pl, operation[1], e, self.F_ob_ef, False))
-            self.TO_perv += operation['cost'] * e
+        for operation in initial_data.operations.rows:
+            name = operation['name']
+
+            if len(name) == 1:
+                e0 = calc_1_1_n_ob_k(initial_data.N_pl, operation['time'], self.N_machine_work_percent, self.F_ob_ef, False)
+                e = math.ceil(e0)
+                self.machines.add_row(name, operation['cost'], e0, e, calc_1_1_n_ob_k(initial_data.N_pl, operation['time'], e, self.F_ob_ef, False))
+                self.TO_perv += operation['cost'] * e
 
         self.main_resources = Table('n', 'name', '%', 'cost')
         mr = self.main_resources
@@ -293,7 +308,7 @@ class Chapter_1:
         self.S_os_amortisable = round(self.S_os * (1.0 - 0.14), 2)
 
         for e in main_resources:
-            mr.add_row(e[0], e[1], e[2] * 100, self.S_os * e[2])
+            mr.add_row(e[0], e[1], e[2], self.S_os * e[2])
 
 
 class Chapter_2:
@@ -851,6 +866,160 @@ class Chapter_10:
         self.proizv_richag_fact = (chapter_8.Q_fact - chapter_4.S_b_poln.variable * chapter_8.N_fact) / chapter_8.P_pr_fact
 
 
+class Chapter_2_1:
+    __slots__ = [
+        'A_percent', 'B_percent', 'C_percent',
+        'N_pl_A', 'N_pl_B', 'N_pl_C',
+        'T_pl', 'B', 'C', 'D', 'O', 'H', 'gamma', 'F_ob_ef'
+    ]
+
+    def __init__(self, initial_data: InitialData):
+        self.A_percent = 0.25
+        self.B_percent = 0.5
+        self.C_percent = 0.25
+
+        self.N_pl_A = round(initial_data.N_pl * self.A_percent)
+        self.N_pl_C = round(initial_data.N_pl * self.C_percent)
+        self.N_pl_B = initial_data.N_pl - self.N_pl_A - self.N_pl_C
+
+        self.T_pl = 365
+        self.B = 128
+        self.C = 2
+        self.D = 8
+        self.O = 20
+        self.H = 20
+        self.gamma = 0.05
+
+        self.F_ob_ef = (self.T_pl - self.B) * self.C * self.D * (1 - self.gamma)
+
+
+class Chapter_2_2:
+    __slots__ = [
+        'b_norm',
+        'machines',
+        'main_resources',
+        'S_os',
+        'S_os_amortisable',
+        'new_machines_cost',
+    ]
+
+    def __init__(self, initial_data: InitialData, chapter_1: Chapter_1, chapter_2_1: Chapter_2_1, chapter_3: Chapter_3):
+        self.b_norm = 0.7
+        F_ob_ef = chapter_2_1.F_ob_ef
+
+        machines = {}
+
+        for operations, N in [
+            [initial_data.operations_A.rows, chapter_2_1.N_pl_A],
+            [initial_data.operations_C.rows, chapter_2_1.N_pl_C],
+            [initial_data.operations_B.rows, chapter_2_1.N_pl_B]]:
+            for operation in operations:
+                name = operation['name']
+                if len(name) == 1:
+                    e = N * operation['time'] / (self.b_norm * F_ob_ef)
+                    if name in machines:
+                        machines[name][0] += e
+                    else:
+                        machines[name] = [e, operation['cost']]
+
+        self.machines = Table('name', 'stock', 'need_rasch', 'need_fact', 'need_new', 'b_fact', 'cost')
+
+        for name, machine_and_cost in machines.items():
+            stock_row = chapter_1.machines.find('name', name)
+            stock = 0
+            if stock_row is not None:
+                stock = stock_row['n fact']
+
+            machine = machine_and_cost[0]
+
+            need_total = math.ceil(machine - 0.05)
+            need_new = max(0, need_total - stock)
+            ct = machine * (self.b_norm * F_ob_ef)
+            b_fact = ct / (need_total * F_ob_ef)
+            self.machines.add_row(name, stock, machine, need_total, need_new, b_fact, machine_and_cost[1])
+
+        self.new_machines_cost = self.machines.calculate_sum(lambda x: x['need_new'] * x['cost'])
+
+        self.main_resources = Table('n', 'name', '%', 'cost I', 'amortisation I', 'cost II begin', 'delta', 'cost II')
+        S_os_delta = round((self.new_machines_cost / 0.4 - chapter_1.S_os) * 0.5, 2)
+
+        self.S_os = 0
+        self.S_os_amortisable = 0
+
+        for old in chapter_1.main_resources.rows:
+            if old['n'] != '1':
+                amortisation = round(old['cost'] * chapter_3.OS_amortisation_percent, 2)
+            else:
+                amortisation = 0
+            cost_2_begin = old['cost'] - amortisation
+            if old['name'] == '- технологическое оборудование':
+                need = self.new_machines_cost
+            elif old['name'] == 'Машины и оборудование, в т.ч.':
+                need = self.new_machines_cost + round(S_os_delta * chapter_1.main_resources.find('name', '- нетехнологические машины и оборудование')['%'], 2)
+            else:
+                need = S_os_delta * old['%']
+            need = round(need, 2)
+            cost_2 = cost_2_begin + need
+            self.S_os += cost_2
+            if old['n'] != '1':
+                self.S_os_amortisable += cost_2
+            self.main_resources.add_row(old['n'], old['name'], old['%'], old['cost'], amortisation, cost_2_begin, need, cost_2)
+
+
+class Chapter_2_3:
+    __slots__ = [
+        'F_rab_ef',
+        'R_opr_raw', 'R_opr',
+        'vpr', 'R_vpr',
+        'sl', 'R_sl',
+        'R_ppp',
+        'FOT_opr', 'FOT_opr_extra',
+        'FOT_vpr', 'FOT_sl',
+        'FOT', 'FOT_fee', 'insurance_fee', 'FOT_with_fee'
+    ]
+
+    def __init__(self, chapter_2: Chapter_2, chapter_2_1: Chapter_2_1):
+        self.F_rab_ef = (chapter_2_1.T_pl - chapter_2_1.B - chapter_2_1.O - chapter_2_1.H) * chapter_2_1.D
+
+        total_time_A = initial_data.operations_A.calculate_sum(lambda x: x['time'])
+        total_time_B = initial_data.operations_B.calculate_sum(lambda x: x['time'])
+        total_time_C = initial_data.operations_C.calculate_sum(lambda x: x['time'])
+
+        total_time = chapter_2_1.N_pl_A * total_time_A + chapter_2_1.N_pl_B * total_time_B + chapter_2_1.N_pl_C * total_time_C
+
+        self.R_opr_raw = total_time / self.F_rab_ef
+        self.R_opr = int(math.ceil(self.R_opr_raw))
+
+        self.vpr = chapter_2.vpr.clone(self.R_opr)
+
+        self.sl = chapter_2.vpr.clone(self.R_opr)
+        self.R_vpr = self.vpr.total
+        self.R_sl = self.sl.total
+
+        self.FOT_opr = chapter_2.p_mean * initial_data.N_pl * len(initial_data.operations)
+        self.FOT_opr_extra = self.R_opr * (chapter_2.opr_extra * 12 + chapter_2.stimulating_salary_percent * chapter_2.opr_salary)
+
+        self.FOT_vpr = self.vpr.calc_sum(lambda amount, salary: amount * salary * (12 + chapter_2.stimulating_salary_percent))
+        self.FOT_sl = self.sl.calc_sum(lambda amount, salary: amount * salary * (12 + chapter_2.stimulating_salary_percent))
+
+        self.R_ppp = self.R_opr + self.R_vpr + self.R_sl
+        self.FOT = Value('fot', self.FOT_vpr + self.FOT_sl, self.FOT_opr + self.FOT_opr_extra, 'Затраты на оплату труда')
+
+        self.insurance_fee = PerPercentTable(self.FOT.total)
+        self.insurance_fee.add_row('ОПФ', 0.22)
+        self.insurance_fee.add_row('ФОМС', 0.051)
+        self.insurance_fee.add_row('ФСС', 0.029)
+        self.insurance_fee.add_row('Страхование от несчастных случаев на производстве и профессиональных заболеваний', 0.04)
+
+        self.FOT_fee = Value('fot fee', round(self.FOT.const * 0.34, 2), round(self.FOT.variable * 0.34, 2), 'Страховые взносы')
+        self.FOT_with_fee = Value('fot total', display_name='ФОТ')
+        self.FOT_with_fee.add_child(self.FOT)
+        self.FOT_with_fee.add_child(self.FOT_fee)
+
+        print(self.R_opr, self.R_vpr, self.R_sl)
+        print(self.vpr)
+
+
 initial_data = InitialData()
 chapter_1 = Chapter_1(initial_data)
 chapter_2 = Chapter_2(initial_data, chapter_1)
@@ -862,6 +1031,21 @@ chapter_7 = Chapter_7(chapter_4, chapter_6)
 chapter_8 = Chapter_8(initial_data, chapter_3, chapter_4, chapter_5, chapter_7)
 chapter_9 = Chapter_9()
 chapter_10 = Chapter_10(initial_data, chapter_1, chapter_2, chapter_3, chapter_4, chapter_6, chapter_7, chapter_8, chapter_9)
+
+chapter_2_1 = Chapter_2_1(initial_data)
+chapter_2_2 = Chapter_2_2(initial_data, chapter_1, chapter_2_1, chapter_3)
+chapter_2_3 = Chapter_2_3(chapter_2, chapter_2_1)
+
+
+def gen_first_list():
+    dp('todo').add_run().add_break(WD_BREAK.PAGE)
+    document.add_section()
+
+    dp('Содержание')
+    p = document.add_paragraph()
+    document.add_page_break()
+
+    return p
 
 
 def gen_introduction():
@@ -923,8 +1107,6 @@ def gen_initial_data():
     build_consumable_table('Вид комплектующих изделий', initial_data.accessories)
     dp()
 
-    document.add_page_break()
-
     dp('Таблица 4, технологическая трудоёмкость изделия Б', table_name_text)
     table_4 = add_table(
         [['Номер технологической операции', 'Используемое оборудование', 'Первоначальная стоимость, тыс.руб./ед', 'Технологическая трудоёмкость, час./шт.']] +
@@ -934,7 +1116,8 @@ def gen_initial_data():
     table_4_lr.cells[0].paragraphs[0].add_run('Итого, час.').bold = True
     table_4_lr.cells[3].paragraphs[0].add_run(str(initial_data.operations.calculate_sum(lambda x: x['time']))).bold = True
     table_4_lr.cells[3].paragraphs[0].alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    dp()
+
+    document.add_page_break()
 
 
 def gen_1_1():
@@ -963,10 +1146,11 @@ def gen_1_1():
     ])
 
     dp('Таблица 1.1, Расчет потребности в технологическом оборудовании', table_name_text)
-    add_table([
-                  ['Операция', 'Расчётное число оборудования', 'Принятое число оборудования', 'Фактический коэффициент нагрузки оборудования']
-              ] + [[e[0]['name'], fn(e[1]), str(e[2]), fn(e[3])] for e in zip(initial_data.operations.rows[1:], chapter.n_ob_k_rasch, chapter.n_ob_k_fact, chapter.b_fact)],
-              [Cm(4), Cm(4), Cm(4), Cm(4)], True)
+    add_table(
+        [
+            ['Операция', 'Расчётное число оборудования', 'Принятое число оборудования', 'Фактический коэффициент нагрузки оборудования']
+        ] + [[e['name'], fn(e['n rasch']), fn(e['n fact'], 0), fn(e['b_fact'])] for e in chapter_1.machines.rows],
+        [Cm(4), Cm(4), Cm(4), Cm(4)], True)
     dp()
     dp(
         'Следует отметить, что можно было взять 3 единицы оборудования для операции «в», однако в таком случае '
@@ -976,8 +1160,8 @@ def gen_1_1():
     dp('Найдём суммарную первоначальную стоимость технологического оборудования, [тыс. руб.]')
 
     sm = []
-    for i in zip(initial_data.operations.rows[1:], chapter.n_ob_k_fact):
-        sm.append(f"{i[0]['cost'] // 1000} \\cdot {i[1]}")
+    for e in chapter_1.machines.rows:
+        sm.append(f"{e['cost'] // 1000} \\cdot {e['n fact']}")
 
     add_formula('ТО_{перв} = \\sum^{m}_{i}{ТО_{перв i} n_{об i_{прин}}} = ' + ' + '.join(sm) + f' = {fn(chapter.TO_perv // 1000)} [тыс.руб.]', style=formula_style_12)
     document.add_page_break()
@@ -985,8 +1169,8 @@ def gen_1_1():
     dp('1.2 Стоимостная структура основных средств', title_text)
     dp('Таблица 1.2, стоимостная структура основных средств', table_name_text)
     table = add_table(
-        [['№', 'Название', '%', 'Стоимость, руб.']] + [[str(e[0]), e[1], fn(e[2], 0), fn(e[3], 0)] for e in chapter_1.main_resources.rows],
-        [Cm(1), Cm(9.5), Cm(1.5), Cm(5)], True
+        [['№', 'Название', '%', 'Стоимость, руб.']] + [[str(e['n']), e['name'], fn(e['%'] * 100, 0), fn(e['cost'], 0)] for e in chapter_1.main_resources.rows],
+        [Cm(1), Cm(8), Cm(1.5), Cm(4)], True
     )
     tr = table.add_row()
     tr.cells[0].merge(tr.cells[1])
@@ -1066,7 +1250,7 @@ def gen_1_2():
         [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in chapter_2.vpr.rows] +
         [['Рабочий', str(chapter_2.R_opr), fn(chapter_2.opr_salary), fn(chapter_2.opr_extra, 0),
           fn(round(chapter_2.opr_salary / 12), 0), 'ОПР', 'Сдельная']],
-        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(2.7), Cm(3), Cm(2.0), Cm(1.9)],
+        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(2.25), Cm(3), Cm(2.0), Cm(2.1)],
         style=table_style_12
     )
 
@@ -1095,21 +1279,21 @@ def gen_1_2():
         [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in chapter_2.sl.rows] +
         [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in chapter_2.vpr.rows] +
         [['Рабочий', str(chapter_2.R_opr), fn(chapter_2.opr_salary * 12, 0), fn(chapter_2.opr_extra * 12, 0),
-          fn(chapter_2.opr_salary, 0), fn(chapter_2.FOT_opr + chapter_2.FOT_opr_extra)]],
+          fn(chapter_2.opr_salary, 0), fn(chapter_2.FOT_opr + chapter_2.FOT_opr_extra, 0)]],
         [Cm(3.7), Cm(2), Cm(2.15), Cm(2.7), Cm(3), Cm(2.25), Cm(1.9)],
         style=table_style_12
     )
     r = table.add_row()
     r.cells[0].paragraphs[0].add_run('Итого').bold = True
     r.cells[1].paragraphs[0].add_run(fn(chapter_2.sl.calc_sum(lambda e, _: e) + chapter_2.vpr.calc_sum(lambda e, _: e) + chapter_2.R_opr, 0)).bold = True
-    r.cells[2].paragraphs[0].add_run(fn(chapter_2.sl.calc_sum(lambda e, c: e * c * 12) + chapter_2.vpr.calc_sum(lambda e, c: e * c * 12) + chapter_2.FOT_opr)).bold = True
-    r.cells[3].paragraphs[0].add_run(fn(chapter_2.R_opr * chapter_2.opr_extra * 12)).bold = True
+    r.cells[2].paragraphs[0].add_run(fn(chapter_2.sl.calc_sum(lambda e, c: e * c * 12) + chapter_2.vpr.calc_sum(lambda e, c: e * c * 12) + chapter_2.FOT_opr, 0)).bold = True
+    r.cells[3].paragraphs[0].add_run(fn(chapter_2.R_opr * chapter_2.opr_extra * 12, 0)).bold = True
     r.cells[4].paragraphs[0].add_run(
         fn(chapter_2.stimulating_salary_percent * (
                 chapter_2.sl.calc_sum(lambda e, c: e * c) +
                 chapter_2.vpr.calc_sum(lambda e, c: e * c) +
                 chapter_2.R_opr * chapter_2.opr_salary
-        ))).bold = True
+        ), 0)).bold = True
     r.cells[5].paragraphs[0].add_run(fn(chapter_2.FOT.total)).bold = True
 
     dp()
@@ -1244,11 +1428,12 @@ def gen_1_4():
     dp('4.3. Построение графических зависимостей (условно-постоянных и переменных затрат)', subtitle_text)
 
     dp('Таблица 4.3.1, условно-постоянные и переменные затраты', table_name_text)
+    table_wdt = [Cm(1), Cm(4), Cm(3.5), Cm(1), Cm(4), Cm(3.5)]
     table = add_table([
-        [f'Суммарные затраты, руб./год: {fn(chapter_4.S_sum.total)}', None, None, None, None, None],
+        [None, None, None, None, None, None],
         ['№', 'Условно-постоянные затраты', 'Сумма, тыс.руб./год', '№', 'Переменные затраты', 'Сумма, тыс.руб./год']
-    ], [Cm(1), Cm(4.5), Cm(3), Cm(1), Cm(4.5), Cm(3)], style=table_style_12)
-    table.cell(0, 0).merge(table.cell(0, 5))
+    ], table_wdt, style=table_style_12)
+    table.cell(0, 0).merge(table.cell(0, 5)).text = f'Суммарные затраты, руб./год: {fn(chapter_4.S_sum.total)}'
     table.cell(0, 0).paragraphs[0].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     table.cell(0, 0).paragraphs[0].runs[0].bold = True
 
@@ -1284,6 +1469,8 @@ def gen_1_4():
         r.cells[3].paragraphs[0].add_run(str(i + 1))
         r.cells[4].paragraphs[0].add_run(v[0])
         r.cells[5].paragraphs[0].add_run(fn(v[1]))
+        for j, e in enumerate(table_wdt):
+            r.cells[j].width = e
 
     r = table.add_row()
     r.cells[0].merge(r.cells[1]).paragraphs[0].add_run('Итого').bold = True
@@ -1311,7 +1498,7 @@ def gen_1_4():
         ['S у-п, руб./год'] + [fn(e) for e in S_const_costs],
         ['S перем, руб./год'] + [fn(e) for e in S_variable_costs],
         ['S сум, руб./год'] + [fn(e) for e in S_total_costs],
-        ], style=table_style_10)
+    ], style=table_style_10)
     document.add_page_break()
 
     dp('Таблица 4.3.3, зависимость себестоимости единицы продукции от величины объема производства за планируемый период', table_name_text)
@@ -1320,7 +1507,7 @@ def gen_1_4():
         ['B у-п, руб./год'] + [fn(e) for e in B_const_costs],
         ['B перем, руб./год'] + [fn(e) for e in B_variable_costs],
         ['B сум, руб./год'] + [fn(e) for e in B_total_costs],
-        ], style=table_style_10)
+    ], style=table_style_10)
 
     dp('График 4.3.4, зависимости общей суммы и себестоимости единицы продукции от величины объёма производства за планируемый период', table_name_text)
     plt.figure(figsize=(10, 4))
@@ -1429,6 +1616,7 @@ def gen_1_5():
         f'{fn(chapter_4.S_b_proizv)} \\cdot {fn(initial_data.N_pl, 0)} }}{{ {chapter_1.T_pl} }} '
         f'\\cdot {fn(chapter_5.k_nz, 2)} \\cdot {fn(chapter_5.T_cycle, 3)} = {fn(chapter_5.K_ob_nez_pr)}\\ [руб.]')
 
+    dp()
     dp('5.3. Оборотные средства в готовой продукции', subtitle_text)
     dp('Время нахождения на складе:')
     add_formula('t_{реал.} = ' + f'{chapter_5.t_real}\\ [дн.]')
@@ -1626,7 +1814,7 @@ def gen_1_8():
         ['Налог на прибыль', fn(chapter_8.nalog_na_pribil_plan), fn(chapter_8.nalog_na_pribil_fact)],
         ['Чистая прибыль (убыток)', fn(chapter_8.P_chistaya_plan), fn(chapter_8.P_chistaya_fact)],
 
-    ], [Cm(11), Cm(6.25), None])
+    ], [Cm(9), Cm(4), Cm(4)])
     table.cell(0, 0).merge(table.cell(1, 0))
     table.cell(0, 1).merge(table.cell(0, 2))
     document.add_page_break()
@@ -1935,10 +2123,167 @@ def gen_1_10():
     picP.add_run().add_break(WD_BREAK.PAGE)
 
 
+def gen_1_11():
+    dp('Выводы', title_text)
+    document.add_page_break()
+
+
+def gen_2_1():
+    dp('РАЗДЕЛ II', title_text)
+    dp()
+    dp('1. Планирование объемов производства изделий А, Б и В', title_text)
+    dp('По результатам работы предприятия в первом периоде часть объема выпуска изделия Б не была реализована даже при рыночной цене (пониженной по сравнению с '
+       'установленной плановой), предполагаем, что часть потребителей не удовлетворена качеством выпускаемого изделия. '
+       'Причем одна группа потребителей готова приобретать аналог А − более высокого качества по более высокой цене, другая группа считает, что некоторые '
+       'свойства изделия Б излишни, и готова приобретать изделие-аналог В более низкого качества и за более умеренную цену. '
+       'Предприятие готово пойти навстречу и организовать производство изделий А и В')
+    dp('Маркетинговое исследование показало что 50% покупателей удовлетворены качеством изделия Б, а 30% хотят что-либо изменить в нём.')
+
+    dp('Таблица 21.1, объём производства', table_name_text)
+    add_table([
+        ['Изделия', 'А', 'Б', 'В'],
+        ['Объём производства, %', fn(chapter_2_1.A_percent * 100, 0), fn(chapter_2_1.B_percent * 100, 0), fn(chapter_2_1.C_percent * 100, 0)],
+        ['Объём производства, шт/год', fn(chapter_2_1.N_pl_A, 0), fn(chapter_2_1.N_pl_B, 0), fn(chapter_2_1.N_pl_C, 0)]
+    ], [Cm(8), Cm(3), Cm(3), Cm(3)], True)
+
+    document.add_page_break()
+
+
+def gen_2_2():
+    dp('2. Дополнительная потребность в оборудовании', title_text)
+    dp('Расчет дополнительных потребностей в')
+    dp('оборудовании (при этом составить стоимостную структуру основных средств)')
+    dp('персонале, рассчитав численность работающих, величины фонда оплаты труда и единого социального налога')
+    dp('материалах и комплектующих изделиях, используя исходную информацию')
+    dp()
+
+    dp('Таблица 22.1, вид материалов', table_name_text)
+    table = add_table([
+        ['Вид материала', None, '1', '2', '3', '4'],
+        ['Стоимость, руб./ед.измер.', 'A'] + [str(e['cost']) for e in initial_data.materials_A.rows],
+        [None, 'B'] + [str(e['cost']) for e in initial_data.materials_C.rows],
+        ['Норма расхода, ед.измер./шт.', 'A'] + [str(e['amount']) for e in initial_data.materials_A.rows],
+        [None, 'B'] + [str(e['amount']) for e in initial_data.materials_C.rows],
+        ['Итого материалов на изделие А, руб./шт.', None, None, None, fn(initial_data.materials_A.calculate_sum(lambda x: x['amount'] * x['cost'])), None],
+        ['Итого материалов на изделие B, руб./шт.', None, None, None, fn(initial_data.materials_C.calculate_sum(lambda x: x['amount'] * x['cost'])), None]
+    ], [Cm(7), Cm(2), Cm(2), Cm(2), Cm(2), Cm(2)], True, style=table_style)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(1, 0).merge(table.cell(2, 0))
+    table.cell(3, 0).merge(table.cell(4, 0))
+    table.cell(5, 0).merge(table.cell(5, 3))
+    table.cell(5, 4).merge(table.cell(5, 5))
+    table.cell(6, 0).merge(table.cell(6, 3))
+    table.cell(6, 4).merge(table.cell(6, 5))
+
+    dp()
+    dp('Таблица 22.2, вид комплектующих', table_name_text)
+    table = add_table([
+        ['Вид материала', None, '1', '2', '3'],
+        ['Стоимость, руб./ед.измер.', 'A'] + [str(e['cost']) for e in initial_data.accessories_A.rows],
+        [None, 'B'] + [str(e['cost']) for e in initial_data.accessories_C.rows],
+        ['Норма расхода, ед.измер./шт.', 'A'] + [str(e['amount']) for e in initial_data.accessories_A.rows],
+        [None, 'B'] + [str(e['amount']) for e in initial_data.accessories_C.rows],
+        ['Итого комплектующих на изделие А, руб./шт.', None, None, fn(initial_data.accessories_A.calculate_sum(lambda x: x['amount'] * x['cost'])), None],
+        ['Итого комплектующих на изделие B, руб./шт.', None, None, fn(initial_data.accessories_C.calculate_sum(lambda x: x['amount'] * x['cost'])), None]
+    ], [Cm(7), Cm(2), Cm(2), Cm(2), Cm(2)], True)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(1, 0).merge(table.cell(2, 0))
+    table.cell(3, 0).merge(table.cell(4, 0))
+    table.cell(5, 0).merge(table.cell(5, 2))
+    table.cell(5, 3).merge(table.cell(5, 4))
+    table.cell(6, 0).merge(table.cell(6, 2))
+    table.cell(6, 3).merge(table.cell(6, 4))
+
+    document.add_page_break()
+
+    dp('Таблица 22.3, технологическая трудоёмкость изделий', table_name_text)
+
+    table = add_table(
+        [
+            ['Номер операции', 'Используемое оборудование', 'Стоимость используемого оборудования, тыс.руб./ед.оборуд.', 'Технологическая трудоёмкость'],
+            ['Изделие А', None, None, None],
+        ] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_A.rows)] +
+        [['Изделие Б', None, None, None]] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_B.rows)] +
+        [['Изделие В', None, None, None]] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_C.rows)],
+        [Cm(3), Cm(3.6), Cm(6.4), Cm(4.5)], True
+    )
+    table.cell(1, 0).merge(table.cell(1, 3)).paragraphs[0].runs[0].bold = True
+    table.cell(2 + len(initial_data.operations_A), 0).merge(
+        table.cell(2 + len(initial_data.operations_A), 3)).paragraphs[0].runs[0].bold = True
+    table.cell(3 + len(initial_data.operations_A) + len(initial_data.operations_B), 0).merge(
+        table.cell(3 + len(initial_data.operations_A) + len(initial_data.operations_B), 3)).paragraphs[0].runs[0].bold = True
+
+    dp()
+    dp('Как видим, оборудование б, в, г подорожало за прошедший год. Учтём это.', no_indent=True)
+    add_formula('\\beta_{норм} = 0.7', dp('Предполагается, что все наименования изделий обрабатываются в основном на одном и том же оборудовании, поэтому с учетом '
+                                          'необходимости переналадки планируемый коэффициент загрузки '))
+    dp('Для определения необходимого количества оборудования используем формулу:')
+    add_formula('n_{об\\ k_{расч}} = \\frac{t_{Ak}N_A+t_{Бk}N_Б+t_{Вk}N_В}{\\beta_{норм} F_{об\\ эф}}')
+
+    document.add_page_break()
+
+    dp('Таблица 22.4, дополнительная потребность в оборудовании во втором периоде', table_name_text)
+    table = add_table(
+        [['Вид и стоимость оборудования, тыс. руб.',
+          'Техн. оборуд. во втором периоде', None,
+          'Имеющееся количесво оборудования',
+          'Доп. количество оборудования',
+          'Стоимость доп. оборудования, руб.',
+          'Фактич. нагрузка на оборуд.'], [None, None, None, None, None, None, None]] +
+        [[f'{e["name"]}, {fn(e["cost"] // 1000, 0)}',
+          fn(e['need_rasch']),
+          fn(e['need_fact'], 0),
+          fn(e['stock'], 0),
+          fn(e['need_new'], 0),
+          fn(e['cost'] * e['need_new']),
+          fn(e['b_fact'])] for e in chapter_2_2.machines.rows] +
+        [['Итого', None,
+          fn(chapter_2_2.machines.calculate_sum(lambda x: x['need_fact']), 0),
+          fn(chapter_2_2.machines.calculate_sum(lambda x: x['stock']), 0),
+          fn(chapter_2_2.machines.calculate_sum(lambda x: x['need_new']), 0),
+          fn(chapter_2_2.new_machines_cost), None]],
+        [Cm(3.2), Cm(1.75), Cm(1.75), Cm(3), Cm(3), Cm(3.25), Cm(2)], style=table_style_12)
+    add_formula('n_{об.i_{расч.}}', table.cell(1, 1).paragraphs[0])
+    add_formula('n_{об.i_{прин.}}', table.cell(1, 2).paragraphs[0])
+    table.cell(0, 0).merge(table.cell(1, 0))
+    table.cell(0, 1).merge(table.cell(0, 2))
+    for i in [3, 4, 5, 6]:
+        table.cell(0, i).merge(table.cell(1, i))
+
+    dp()
+    dp('Таблица 22.5, стоимостная структура ОС на начало второго периода', table_name_text)
+    table = add_table(
+        [['№',
+          'Группа (виды) основных средств (ОС)',
+          'Стоимость ОС на начало I периода, руб.',
+          'Амортизация ОС за I период, руб.',
+          'Стоимость ОС на начало II периода, руб.',
+          'Изменение ОС, руб.',
+          'Стоимость ОС на начало II периода, с учетом прироста ОС, руб.',
+          '%']] +
+        [[e['n'], e['name'], fn(e['cost I'], 0), fn(e['amortisation I'], 0),
+          fn(e['cost II begin'], 0), fn(e['delta'], 0), fn(e['cost II'], 0), fn(e['cost II'] / chapter_2_2.S_os * 100, 1)] for e in chapter_2_2.main_resources.rows] +
+        [[None, 'Итого',
+          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost I']), 0),
+          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['amortisation I']), 0),
+          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost II begin']), 0),
+          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['delta']), 0),
+          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost II']), 0),
+          None]],
+        [Cm(0.7), Cm(3.8), Cm(2.25), Cm(2.25), Cm(2.25), Cm(2.25), Cm(3.25), Cm(1.0)],
+        first_bold=True, style=table_style_10
+    )
+    table.cell(len(table.rows) - 1, 0).merge(table.cell(len(table.rows) - 1, 1))
+
+
+def gen_2_3():
+    dp('3. Дополнительная потребность в промышленно-производственном персонале', title_text)
+    dp('Рассчитаем численность ППП, ФОТ, страховые взносы аналогично первому периоду. Оклады остаются неизменными')
 
 
 def main():
     init_styles()
+    p = gen_first_list()
     gen_introduction()
     gen_initial_data()
     gen_1_1()
@@ -1951,13 +2296,92 @@ def main():
     gen_1_8()
     gen_1_9()
     gen_1_10()
+    gen_1_11()
+
+    gen_2_1()
+    gen_2_2()
+    gen_2_3()
+    # gen_2_4()
+    # gen_2_5()
+    # gen_2_6()
+    # gen_2_7() # today
+    # gen_2_8()
+    # gen_2_9()
+    # gen_2_10()
+
+    return p
+
+
+def add_page_numbers(paragraph):
+    def create_element(name):
+        return OxmlElement(name)
+
+    def create_attribute(element, name, value):
+        element.set(ns.qn(name), value)
+
+    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+
+    page_num_run = paragraph.add_run()
+
+    fldChar1 = create_element('w:fldChar')
+    create_attribute(fldChar1, 'w:fldCharType', 'begin')
+
+    instrText = create_element('w:instrText')
+    create_attribute(instrText, 'xml:space', 'preserve')
+    instrText.text = "PAGE"
+
+    fldChar2 = create_element('w:fldChar')
+    create_attribute(fldChar2, 'w:fldCharType', 'end')
+
+    page_num_run._r.append(fldChar1)
+    page_num_run._r.append(instrText)
+    page_num_run._r.append(fldChar2)
+
+    fldChar3 = create_element('w:fldChar')
+    create_attribute(fldChar3, 'w:fldCharType', 'begin')
+
+    fldChar4 = create_element('w:fldChar')
+    create_attribute(fldChar4, 'w:fldCharType', 'end')
+
+    num_pages_run = paragraph.add_run()
+    num_pages_run._r.append(fldChar3)
+    num_pages_run._r.append(fldChar4)
+
+
+def add_table_of_content(paragraph):
+    run = paragraph.add_run()
+    fldChar = OxmlElement('w:fldChar')  # creates a new element
+    fldChar.set(ns.qn('w:fldCharType'), 'begin')  # sets attribute on element
+    instrText = OxmlElement('w:instrText')
+    instrText.set(ns.qn('xml:space'), 'preserve')  # sets attribute on element
+    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'  # change 1-3 depending on heading levels you need
+
+    fldChar2 = OxmlElement('w:fldChar')
+    fldChar2.set(ns.qn('w:fldCharType'), 'separate')
+    fldChar3 = OxmlElement('w:t')
+    fldChar3.text = "Right-click to update field."
+    fldChar2.append(fldChar3)
+
+    fldChar4 = OxmlElement('w:fldChar')
+    fldChar4.set(ns.qn('w:fldCharType'), 'end')
+
+    r_element = run._r
+    r_element.append(fldChar)
+    r_element.append(instrText)
+    r_element.append(fldChar2)
+    r_element.append(fldChar4)
+    p_element = paragraph._p
 
 
 if __name__ == '__main__':
     import time
 
     t = time.time()
-    main()
+    paragraph = main()
+
+    document.sections[1].footer.is_linked_to_previous = False
+    add_page_numbers(document.sections[1].footer.paragraphs[0])
+    add_table_of_content(paragraph)
 
     sections = document.sections
     for section in sections:

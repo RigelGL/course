@@ -184,6 +184,11 @@ class Table:
             s += callback(i)
         return s
 
+    def find(self, param_name, value) -> _TableRow:
+        for row in self.rows:
+            if row[param_name] == value:
+                return row
+
     def __len__(self):
         return len(self.rows)
 
@@ -304,6 +309,12 @@ class PerPercentTable:
                 v = max(1 if self._minimum_is_one else 0, round(v))
             s += callback(v, row.data)
         return s
+
+    def clone(self, initial_value: [int, float]):
+        r = PerPercentTable(initial_value, self._minimum_is_one, self._normalize)
+        for row in self.rows:
+            r.add_row(row.name, row.percent, row.data)
+        return r
 
     def __len__(self):
         return len(self.rows)
