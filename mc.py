@@ -12,13 +12,15 @@ from docx.oxml import OxmlElement
 from docx.shared import Inches, Mm, Cm, Pt, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_BREAK
 from docx.enum.style import WD_STYLE_TYPE
-from course import Table, Value, PerPercentTable, CalculateTable, ActivePassive
+from docx.enum.section import WD_ORIENTATION
+from course import Table, Value, PerPercentTable, CalculateTable, ActivePassive, DirectCosts, WorkAndOther, ExtendedActivePassive
 
 # formatting
 document = Document()
 
 title_text = None
 subtitle_text = None
+subtitle_2_text = None
 main_text = None
 table_name_text = None
 formula_style = None
@@ -31,7 +33,7 @@ table_style_10 = None
 
 
 def init_styles():
-    global main_text, title_text, table_name_text, subtitle_text, \
+    global main_text, title_text, table_name_text, subtitle_text, subtitle_2_text, \
         formula_style, formula_style_12, table_style, table_style_dense, \
         table_style_12, table_style_12_dense, table_style_10
     FONT_NAME = 'Times New Roman'
@@ -65,6 +67,7 @@ def init_styles():
 
     title_text = gen_paragraph_style('Title text', Pt(16), space_after=Pt(12), base=document.styles['Heading 1'])
     subtitle_text = gen_paragraph_style('Subtitle text', Pt(14), space_after=Pt(8), base=document.styles['Heading 2'])
+    subtitle_2_text = gen_paragraph_style('Subtitle 2 text', Pt(14), space_after=Pt(8), base=document.styles['Heading 3'])
     main_text = gen_paragraph_style('Main text', Pt(14), Cm(1.25), alignment=WD_PARAGRAPH_ALIGNMENT.JUSTIFY)
 
     table_name_text = gen_paragraph_style('Table name text', Pt(12), space_before=Pt(12), space_after=Pt(4), alignment=WD_PARAGRAPH_ALIGNMENT.CENTER)
@@ -115,7 +118,7 @@ def add_formula_with_description(latex, description, style=None):
     fs = Pt(14)
     p.add_run('\nГде:\n').font.size = fs
     for i, e in enumerate(description):
-        add_formula(e[0], p)
+        add_formula(e[0], p, formula_style)
         p.add_run(' - ' + e[1] + ('\n' if i + 1 < len(description) else '')).font.size = fs
     return p
 
@@ -179,6 +182,141 @@ def add_active_passive_table(active_passive):
     return table
 
 
+def add_employee_structure_table(data):
+    table = add_table(
+        [['Должность',
+          'Число сотрудников',
+          'Тарифная ставка, руб./мес.',
+          'Надбавки, руб./мес.',
+          'Стимулирующие выплаты, руб./мес.',
+          'Категория исполнителей',
+          'Система оплаты',
+          ]] +
+        [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in data.sl.rows] +
+        [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in data.vpr.rows] +
+        [['Рабочий', str(data.R_opr), fn(data.opr_salary), fn(data.opr_extra, 0),
+          fn(round(data.opr_salary / 12), 0), 'ОПР', 'Сдельная']],
+        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(2.25), Cm(3), Cm(2.0), Cm(2.1)],
+        style=table_style_12
+    )
+
+    table.cell(1, 5).merge(table.cell(len(data.sl), 5))
+    table.cell(1, 5).paragraphs[0].add_run('Служащие')
+
+    table.cell(1 + len(data.sl), 5).merge(table.cell(1 + len(data.sl) + len(data.vpr) - 1, 5))
+    table.cell(1 + len(data.sl), 5).paragraphs[0].add_run('ВПР')
+
+    table.cell(1, 6).merge(table.cell(1 + len(data.sl) + len(data.vpr) - 1, 6))
+    table.cell(1, 6).paragraphs[0].add_run('Повременная')
+
+
+def add_employee_salary_table(data):
+    table = add_table(
+        [['Должность',
+          'Число сотрудников',
+          'Тарифная ставка, руб./год',
+          'Надбавки, руб./год',
+          'Стимулирующие выплаты, руб./год',
+          'Итого, руб./год'
+          ]] +
+        [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in data.sl.rows] +
+        [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in data.vpr.rows] +
+        [['Рабочий', str(data.R_opr), fn(data.opr_salary * 12, 0), fn(data.opr_extra * 12, 0),
+          fn(data.opr_salary, 0), fn(data.FOT_opr + data.FOT_opr_extra, 0)]],
+        [Cm(3.7), Cm(2), Cm(2.15), Cm(2.7), Cm(3), Cm(3), Cm(2.5)],
+        style=table_style_12
+    )
+    r = table.add_row()
+    r.cells[0].paragraphs[0].add_run('Итого').bold = True
+    r.cells[1].paragraphs[0].add_run(fn(data.sl.calc_sum(lambda e, _: e) + data.vpr.calc_sum(lambda e, _: e) + data.R_opr, 0)).bold = True
+    r.cells[2].paragraphs[0].add_run(fn(data.sl.calc_sum(lambda e, c: e * c * 12) + data.vpr.calc_sum(lambda e, c: e * c * 12) + data.FOT_opr, 0)).bold = True
+    r.cells[3].paragraphs[0].add_run(fn(data.R_opr * data.opr_extra * 12, 0)).bold = True
+    r.cells[4].paragraphs[0].add_run(
+        fn(data.stimulating_salary_percent * (
+                data.sl.calc_sum(lambda e, c: e * c) +
+                data.vpr.calc_sum(lambda e, c: e * c) +
+                data.R_opr * data.opr_salary
+        ), 0)).bold = True
+    r.cells[5].paragraphs[0].add_run(fn(data.FOT.total)).bold = True
+
+
+def add_production_calculation_table(direct: DirectCosts, indirect: WorkAndOther, kom):
+    full = direct.direct + indirect.total + kom
+    table = add_table([
+        ['Статья затрат', 'Сумма, руб./шт.', '%'],
+        ['Прямые затраты', None, None],
+        ['    материалы и комплектующие изделия', fn(direct.materials_i_comp), '0'],
+        ['    заработная плата ОРП', fn(direct.FOT), '0'],
+        ['    страховые взносы', fn(direct.FOT_fee), '0'],
+        ['    амортизация', fn(direct.amortisation), '0'],
+        ['Итого прямые затраты', fn(direct.direct), '0'],
+        [None, None, None],
+        ['Косвенные затраты', None, None],
+        ['    связанные с работой оборудования', fn(indirect.work), '0'],
+        ['    не связанные с работой оборудования', fn(indirect.other), '0'],
+        ['Итого косвенные затраты', fn(indirect.total), '0'],
+        [None, None, None],
+        ['Производственная себестоимость', fn(direct.direct + indirect.total), '0'],
+        ['Коммерческие затраты', fn(kom), '0'],
+        ['Полная себестоимость изделия', fn(full), '0']
+    ], [Cm(9), Cm(5), Cm(2)], style=table_style_12_dense, first_bold=True)
+    return table
+
+
+def add_const_and_variable_costs_table(S_sum, FOT, FOT_fee, style=None):
+    costs = S_sum['S proizv']
+    S_kom = S_sum['S_kom']
+    table_wdt = [Cm(1), Cm(4), Cm(3.5), Cm(1), Cm(4), Cm(3.5)]
+    table = add_table([
+        [None, None, None, None, None, None],
+        ['№', 'Условно-постоянные затраты', 'Сумма, тыс.руб./год', '№', 'Переменные затраты', 'Сумма, тыс.руб./год']
+    ], table_wdt, style=table_style_12 if style is None else style)
+    table.cell(0, 0).merge(table.cell(0, 5)).text = f'Суммарные затраты, руб./год: {fn(S_sum.total)}'
+    table.cell(0, 0).paragraphs[0].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    table.cell(0, 0).paragraphs[0].runs[0].bold = True
+
+    const = [
+        (S_kom._display_name, S_kom.const),
+        (costs['fuel non tech']._display_name, costs['fuel non tech'].const),
+        ('З/п кроме ОПР', FOT.const),
+        ('Страховые взносы кроме ОПР', FOT_fee.const),
+        (costs['amortisation']._display_name, costs['amortisation'].const),
+        (costs['inventory']._display_name, costs['inventory'].const),
+        (costs['move save']._display_name, costs['move save'].const),
+        (costs['extra']._display_name, costs['extra'].const)
+    ]
+
+    variable = [
+        (S_kom._display_name, S_kom.variable),
+        (costs['fuel tech']._display_name, costs['fuel tech'].variable),
+        ('З/п ОПР', FOT.variable),
+        ('Страховые взносы ОПР', FOT_fee.variable),
+        (costs['material_main']._display_name, costs['material_main'].variable),
+        (costs['helper']._display_name, costs['helper'].variable),
+        (costs['move save']._display_name, costs['move save'].variable),
+        (costs['extra']._display_name, costs['extra'].variable)
+    ]
+
+    for i, z in enumerate(zip(const, variable)):
+        c = z[0]
+        v = z[1]
+        r = table.add_row()
+        r.cells[0].paragraphs[0].add_run(str(i + 1))
+        r.cells[1].paragraphs[0].add_run(c[0])
+        r.cells[2].paragraphs[0].add_run(fn(c[1]))
+        r.cells[3].paragraphs[0].add_run(str(i + 1))
+        r.cells[4].paragraphs[0].add_run(v[0])
+        r.cells[5].paragraphs[0].add_run(fn(v[1]))
+        for j, e in enumerate(table_wdt):
+            r.cells[j].width = e
+
+    r = table.add_row()
+    r.cells[0].merge(r.cells[1]).paragraphs[0].add_run('Итого').bold = True
+    r.cells[2].paragraphs[0].add_run(fn(sum([e[1] for e in const])))
+    r.cells[3].merge(r.cells[4]).paragraphs[0].add_run('Итого').bold = True
+    r.cells[5].paragraphs[0].add_run(fn(sum([e[1] for e in variable])))
+
+
 def fn(num, ln=2):
     return ('{:,.' + str(ln) + 'f}').format(num)
 
@@ -219,7 +357,7 @@ class InitialData:
         self.materials_A.add_row('г', 15, 8, 30)
 
         self.accessories_A = Table('name', 'cost', 'amount', 't_zap')
-        self.accessories_A.add_row('а', 0, 0, 0)
+        self.accessories_A.add_row('-', 0, 0, 0)
         self.accessories_A.add_row('б', 70, 4, 30)
         self.accessories_A.add_row('в', 40, 2, 30)
 
@@ -234,14 +372,14 @@ class InitialData:
 
         self.materials_C = Table('name', 'cost', 'amount', 't_zap')
         self.materials_C.add_row('а', 35, 1, 30)
-        self.materials_C.add_row('б', 50, 1, 30)
-        self.materials_C.add_row('в', 0, 0, 30)
-        self.materials_C.add_row('г', 15, 4, 30)
+        self.materials_C.add_row('б', 50, 1, 50)
+        self.materials_C.add_row('-', 0, 0, 0)
+        self.materials_C.add_row('г', 15, 4, 75)
 
         self.accessories_C = Table('name', 'cost', 'amount', 't_zap')
-        self.accessories_C.add_row('а', 70, 1, 30)
-        self.accessories_C.add_row('б', 0, 0, 0)
-        self.accessories_C.add_row('в', 40, 2, 30)
+        self.accessories_C.add_row('а', 70, 1, 35)
+        self.accessories_C.add_row('-', 0, 0, 0)
+        self.accessories_C.add_row('в', 40, 2, 40)
 
         self.operations_C = Table('cost', 'time', 'name')
         self.operations_C.add_row(1_200_000, 0.2, 'а')
@@ -356,8 +494,8 @@ class Chapter_2:
 
         self.stimulating_salary_percent = 1.0
 
-        self.C_opr_mean = round(12 * self.opr_salary / self.F_rab_ef, 2)
-        self.p_mean = round(self.C_opr_mean * total_time / len(initial_data.operations.rows), 2)
+        self.C_opr_mean = 12 * self.opr_salary / self.F_rab_ef
+        self.p_mean = self.C_opr_mean * total_time / len(initial_data.operations.rows)
 
         self.FOT_opr = self.p_mean * initial_data.N_pl * len(initial_data.operations)
         self.FOT_opr_extra = self.R_opr * (self.opr_extra * 12 + self.stimulating_salary_percent * self.opr_salary)
@@ -417,7 +555,7 @@ class Chapter_3:
     def __init__(self, initial_data: InitialData, chapter_1: Chapter_1, chapter_2: Chapter_2, const=None):
         self.S_mat_i_comp = initial_data.materials.calculate_sum(lambda x: x['cost'] * x['amount']) + initial_data.accessories.calculate_sum(lambda x: x['cost'] * x['amount'])
 
-        self.costs = Value('proizv', display_name='Затраты')
+        self.costs = Value('S proizv', display_name='Затраты')
         self.main_materials = Value('material', variable=initial_data.N_pl * self.S_mat_i_comp, display_name='Материальные затраты')
         m_base = self.main_materials.total
 
@@ -496,20 +634,20 @@ class Chapter_4:
         fake_chapter_4 = Chapter_4(fake_initial, fake_chapter_3, self.S_kom)
         return fake_chapter_4.S_sum.head()
 
-    def __init__(self, initial_data: InitialData, chapter_3: Chapter_3, const=None):
+    def __init__(self, initial_data_fm: InitialData, chapter_3: Chapter_3, const=None):
         self.N_pl_values = [450, 2700, 7200, 18900, 33750, 45000]
-        self.S_b_proizv = chapter_3.S_pr_tek_pl / initial_data.N_pl
+        self.S_b_proizv = chapter_3.S_pr_tek_pl / initial_data_fm.N_pl
         self.S_kom_percent = 0.04
         self.S_kom_const_percent = 0.6
-        s = round(self.S_b_proizv * self.S_kom_percent, 0) * initial_data.N_pl
+        s = round(self.S_b_proizv * self.S_kom_percent, 0) * initial_data_fm.N_pl
         sc = round(s * self.S_kom_const_percent, 2) if const is None or const['S_kom'] is None else const['S_kom'].const
-        sv = round(s - sc, 2) if const is None or const['S_kom'] is None else s * (1 - self.S_kom_const_percent)
+        sv = round(s - sc, 2) if const is None or const['S_kom'] is None else s * (1 - self.S_kom_const_percent) * initial_data_fm.N_pl / initial_data.N_pl
 
         self.S_sum = Value('S_sum', display_name='Суммарные затраты')
         self.S_sum.add_child(chapter_3.costs)
         self.S_kom = Value('S_kom', sc, sv, 'Коммерческие затраты')
         self.S_sum.add_child(self.S_kom)
-        self.S_b_poln = Value('S_b_poln', self.S_sum.const / initial_data.N_pl, self.S_sum.variable / initial_data.N_pl)
+        self.S_b_poln = Value('S_b_poln', self.S_sum.const / initial_data_fm.N_pl, self.S_sum.variable / initial_data_fm.N_pl)
 
         if const is None:
             self.ct1 = CalculateTable(self.N_pl_values, Chapter_4.calc_n, self)
@@ -574,10 +712,11 @@ class Chapter_6:
         self.active_passive.NMA = chapter_3.NMA
         self.active_passive.OS = chapter_1.S_os
 
-        self.k_ob_RPB_percent = 0.5
+        self.k_ob_RPB_percent = 0.3
         self.active_passive.K_ob_RBP = round(chapter_5.K_ob_extra * self.k_ob_RPB_percent, 2)
         self.active_passive.K_ob_sr_pr_zap = chapter_5.K_ob_sr_pr_zap
         self.active_passive.K_ob_ds = chapter_5.K_ob_sum - (chapter_5.K_ob_sr_pr_zap + self.active_passive.K_ob_RBP)
+        self.active_passive.K_ob_extra = chapter_5.K_ob_extra - self.active_passive.K_ob_RBP
 
         self.ustavnoy_capital_percent = 0.8
         self.active_passive.ustavnoy_kapital = round(self.active_passive.active * self.ustavnoy_capital_percent, 2)
@@ -723,7 +862,8 @@ class Chapter_9:
         f.K_ob_sr_pr_zap = p.K_ob_sr_pr_zap = chapter_5.K_ob_sr_pr_zap
         f.K_ob_nez_pr = p.K_ob_nez_pr = chapter_5.K_ob_nez_pr
         p.K_ob_got_prod = chapter_5.K_ob_got_prod
-        p.K_ob_RBP = chapter_6.active_passive.K_ob_RBP
+        f.K_ob_RBP = p.K_ob_RBP = chapter_6.active_passive.K_ob_RBP
+        f.K_ob_extra = p.K_ob_extra = chapter_6.active_passive.K_ob_extra
         p.K_ob_ds = self.K_den_sr_konez_plan
 
         p.ustavnoy_kapital = chapter_6.active_passive.ustavnoy_kapital
@@ -735,7 +875,6 @@ class Chapter_9:
         p.kratkosroch_prochee = chapter_6.active_passive.kratkosroch_prochee
 
         f.K_ob_got_prod = chapter_8.K_ob_got_prod_fact
-        f.K_ob_RBP = chapter_6.active_passive.K_ob_RBP
         f.K_ob_ds = self.K_den_sr_konez_fact
 
         f.ustavnoy_kapital = chapter_6.active_passive.ustavnoy_kapital
@@ -898,6 +1037,7 @@ class Chapter_2_2:
         'b_norm',
         'machines',
         'main_resources',
+        'TO_perv',
         'S_os',
         'S_os_amortisable',
         'new_machines_cost',
@@ -935,13 +1075,16 @@ class Chapter_2_2:
             need_total = math.ceil(machine - 0.05)
             need_new = max(0, need_total - stock)
             ct = machine * (self.b_norm * F_ob_ef)
-            b_fact = ct / (need_total * F_ob_ef)
+            try:
+                b_fact = ct / (need_total * F_ob_ef)
+            except:
+                b_fact = 0
             self.machines.add_row(name, stock, machine, need_total, need_new, b_fact, machine_and_cost[1])
 
         self.new_machines_cost = self.machines.calculate_sum(lambda x: x['need_new'] * x['cost'])
 
         self.main_resources = Table('n', 'name', '%', 'cost I', 'amortisation I', 'cost II begin', 'delta', 'cost II')
-        S_os_delta = round((self.new_machines_cost / 0.4 - chapter_1.S_os) * 0.5, 2)
+        S_os_delta = round(self.new_machines_cost / 0.4 * 0.5, 2)
 
         self.S_os = 0
         self.S_os_amortisable = 0
@@ -960,47 +1103,62 @@ class Chapter_2_2:
                 need = S_os_delta * old['%']
             need = round(need, 2)
             cost_2 = cost_2_begin + need
-            self.S_os += cost_2
-            if old['n'] != '1':
-                self.S_os_amortisable += cost_2
+            if len(old['n']) > 0:
+                self.S_os += cost_2
+                if old['n'] != '1':
+                    self.S_os_amortisable += cost_2
             self.main_resources.add_row(old['n'], old['name'], old['%'], old['cost'], amortisation, cost_2_begin, need, cost_2)
+
+        self.TO_perv = chapter_1.TO_perv + self.new_machines_cost
 
 
 class Chapter_2_3:
     __slots__ = [
-        'F_rab_ef',
+        'F_rab_ef', 'C_opr_mean',
+        'total_time_A',
+        'total_time_B',
+        'total_time_C',
+        'total_time',
+        'opr_salary', 'opr_extra',
+        'stimulating_salary_percent',
         'R_opr_raw', 'R_opr',
         'vpr', 'R_vpr',
         'sl', 'R_sl',
         'R_ppp',
         'FOT_opr', 'FOT_opr_extra',
         'FOT_vpr', 'FOT_sl',
-        'FOT', 'FOT_fee', 'insurance_fee', 'FOT_with_fee'
+        'FOT', 'FOT_fee', 'insurance_fee', 'FOT_with_fee',
     ]
 
     def __init__(self, chapter_2: Chapter_2, chapter_2_1: Chapter_2_1):
         self.F_rab_ef = (chapter_2_1.T_pl - chapter_2_1.B - chapter_2_1.O - chapter_2_1.H) * chapter_2_1.D
 
-        total_time_A = initial_data.operations_A.calculate_sum(lambda x: x['time'])
-        total_time_B = initial_data.operations_B.calculate_sum(lambda x: x['time'])
-        total_time_C = initial_data.operations_C.calculate_sum(lambda x: x['time'])
+        self.total_time_A = initial_data.operations_A.calculate_sum(lambda x: x['time'])
+        self.total_time_B = initial_data.operations_B.calculate_sum(lambda x: x['time'])
+        self.total_time_C = initial_data.operations_C.calculate_sum(lambda x: x['time'])
 
-        total_time = chapter_2_1.N_pl_A * total_time_A + chapter_2_1.N_pl_B * total_time_B + chapter_2_1.N_pl_C * total_time_C
+        self.total_time = chapter_2_1.N_pl_A * self.total_time_A + chapter_2_1.N_pl_B * self.total_time_B + chapter_2_1.N_pl_C * self.total_time_C
 
-        self.R_opr_raw = total_time / self.F_rab_ef
+        self.opr_salary = chapter_2.opr_salary
+        self.opr_extra = chapter_2.opr_extra
+        self.stimulating_salary_percent = chapter_2.stimulating_salary_percent
+
+        self.R_opr_raw = self.total_time / self.F_rab_ef
         self.R_opr = int(math.ceil(self.R_opr_raw))
 
         self.vpr = chapter_2.vpr.clone(self.R_opr)
 
-        self.sl = chapter_2.vpr.clone(self.R_opr)
+        self.sl = chapter_2.sl.clone(self.R_opr)
         self.R_vpr = self.vpr.total
         self.R_sl = self.sl.total
 
-        self.FOT_opr = chapter_2.p_mean * initial_data.N_pl * len(initial_data.operations)
-        self.FOT_opr_extra = self.R_opr * (chapter_2.opr_extra * 12 + chapter_2.stimulating_salary_percent * chapter_2.opr_salary)
+        self.C_opr_mean = round(12 * self.opr_salary / self.F_rab_ef, 2)
 
-        self.FOT_vpr = self.vpr.calc_sum(lambda amount, salary: amount * salary * (12 + chapter_2.stimulating_salary_percent))
-        self.FOT_sl = self.sl.calc_sum(lambda amount, salary: amount * salary * (12 + chapter_2.stimulating_salary_percent))
+        self.FOT_opr = self.C_opr_mean * self.total_time
+        self.FOT_opr_extra = self.R_opr * (self.opr_extra * 12 + self.stimulating_salary_percent * self.opr_salary)
+
+        self.FOT_vpr = self.vpr.calc_sum(lambda amount, salary: amount * salary * (12 + self.stimulating_salary_percent))
+        self.FOT_sl = self.sl.calc_sum(lambda amount, salary: amount * salary * (12 + self.stimulating_salary_percent))
 
         self.R_ppp = self.R_opr + self.R_vpr + self.R_sl
         self.FOT = Value('fot', self.FOT_vpr + self.FOT_sl, self.FOT_opr + self.FOT_opr_extra, 'Затраты на оплату труда')
@@ -1016,8 +1174,681 @@ class Chapter_2_3:
         self.FOT_with_fee.add_child(self.FOT)
         self.FOT_with_fee.add_child(self.FOT_fee)
 
-        print(self.R_opr, self.R_vpr, self.R_sl)
-        print(self.vpr)
+
+class Chapter_2_4:
+    __slots__ = [
+        'S_materials_i_comp_A',
+        'S_materials_i_comp_B',
+        'S_materials_i_comp_C',
+
+        'main_materials',
+
+        'OS_amortisation',
+
+        'NMA',
+        'NMA_amortisation',
+
+        'OS_fix',
+
+        'costs',
+        'S_pr_tek_pl',
+        'S_kom',
+        'S_sum'
+    ]
+
+    def __init__(self, initial_data: InitialData, chapter_3: Chapter_3, chapter_4: Chapter_4, chapter_2_1: Chapter_2_1, chapter_2_3: Chapter_2_3, const=None):
+        self.S_materials_i_comp_B = chapter_3.S_mat_i_comp
+
+        A_m = initial_data.materials_A.calculate_sum(lambda x: x['amount'] * x['cost'])
+        A_a = initial_data.accessories_A.calculate_sum(lambda x: x['amount'] * x['cost'])
+        self.S_materials_i_comp_A = A_m + A_a
+
+        C_m = initial_data.materials_C.calculate_sum(lambda x: x['amount'] * x['cost'])
+        C_a = initial_data.accessories_C.calculate_sum(lambda x: x['amount'] * x['cost'])
+        self.S_materials_i_comp_C = C_m + C_a
+
+        main_materials = chapter_2_1.N_pl_A * self.S_materials_i_comp_A + chapter_2_1.N_pl_B * self.S_materials_i_comp_B + chapter_2_1.N_pl_C * self.S_materials_i_comp_C
+
+        self.costs = Value('S proizv', display_name='Затраты')
+        self.main_materials = Value('material', variable=main_materials, display_name='Материальные затраты')
+        m_base = self.main_materials.total
+
+        self.main_materials.add_child(Value('material_main', 0, m_base, display_name='Основные материалы'))
+
+        self.main_materials.add_child(Value('helper', 0, round(m_base * chapter_3.help_materials_percent, 2), display_name='Вспомогательные материалы'))
+
+        ms = round(m_base * chapter_3.moving_save_percent, 2)
+        msc = round(ms * chapter_3.move_save_const_percent, 2) if const is None or const['move save'] is None else const['move save'].const
+        msv = round(ms - msc, 2) if const is None or const['move save'] is None else round((1 - chapter_3.move_save_const_percent) * ms, 2)
+        self.main_materials.add_child(Value('move save', msc, msv, display_name='Транспортно-заготовительные расходы'))
+
+        self.main_materials.add_child(Value('inventory', const=round(m_base * chapter_3.inventory_percent, 2), display_name='Инструменты, инвентарь')
+                                      if const is None or const['inventory'] is None else const['inventory'])
+
+        fuelt = round(m_base * chapter_3.fuel_percent, 2)
+
+        fuel_energy_costs = self.main_materials.add_child(Value('fuel total', display_name='Топливо и энергия'))
+        ft = fuel_energy_costs.add_child(Value('fuel tech', variable=round(fuelt * chapter_3.fuel_tech_percent, 2), display_name='Технологическое топливо и энергия'))
+        fuel_energy_costs.add_child(Value('fuel non tech', const=fuelt - ft.total, display_name='Нетехнологическое топливо и энергия')
+                                    if const is None or const['fuel non tech'] is None else const['fuel non tech'])
+        self.costs.add_child(self.main_materials)
+
+        self.costs.add_child(chapter_2_3.FOT)
+        self.costs.add_child(chapter_2_3.FOT_fee)
+
+        self.OS_amortisation = round(chapter_3.OS_amortisation_percent * chapter_2_2.S_os_amortisable, 2)
+
+        self.NMA_amortisation = chapter_3.NMA_amortisation
+        self.NMA = round(chapter_3.NMA - chapter_3.NMA_amortisation, 2)
+
+        aos = Value('amortisation OS', const=self.OS_amortisation, display_name='Амортизация ОС')
+        anma = Value('amortisation NMA', const=self.NMA_amortisation, display_name='Амортизация НМА')
+        a = Value('amortisation', display_name='Амортизация ОС и НМА')
+        a.add_child(aos)
+        a.add_child(anma)
+        self.costs.add_child(a)
+
+        self.OS_fix = round(chapter_3.OS_fix_percent * chapter_2_2.S_os_amortisable, 2)
+
+        ex = Value('extra', display_name='Прочие затраты')
+        ex.add_child(Value('OS fix', const=self.OS_fix, display_name='Средства на ремонт ОС'))
+        ex.add_child(Value('pure extra', self.costs.const * chapter_3.extra_percent, self.costs.variable * chapter_3.extra_percent))
+        self.costs.add_child(ex)
+
+        self.S_pr_tek_pl = self.costs.total
+
+        s = round(self.S_pr_tek_pl * chapter_4.S_kom_percent // 10_000, 0) * 10_000
+        sc = round(s * chapter_4.S_kom_const_percent, 2) if const is None or const['S_kom'] is None else const['S_kom'].const
+        sv = round(s - sc, 2) if const is None or const['S_kom'] is None else s * (1 - chapter_4.S_kom_const_percent)
+
+        self.S_sum = Value('S_sum', display_name='Суммарные затраты')
+        self.S_sum.add_child(self.costs)
+        self.S_kom = Value('S_kom', sc, sv, 'Коммерческие затраты')
+        self.S_sum.add_child(self.S_kom)
+
+
+class Chapter_2_5:
+    __slots__ = [
+        'direct_A',
+        'direct_B',
+        'direct_C',
+
+        'direct_total',
+        'total_machine_time',
+        'indirect',
+
+        'machine_time_A',
+        'machine_time_B',
+        'machine_time_C',
+        'total_machine_time',
+        'S_m_ch',
+
+        'S_rab_ob_A',
+        'S_rab_ob_B',
+        'S_rab_ob_C',
+
+        'S_sv_s_rab_ob_A',
+        'S_sv_s_rab_ob_B',
+        'S_sv_s_rab_ob_C',
+
+        'S_ne_sv_s_rab_ob_A',
+        'S_ne_sv_s_rab_ob_B',
+        'S_ne_sv_s_rab_ob_C',
+
+        'k_kosv',
+
+        'S_A_proizv',
+        'S_B_proizv',
+        'S_C_proizv',
+    ]
+
+    def __init__(self, initial_data: InitialData, chapter_3: Chapter_3, chapter_2_1: Chapter_2_1, chapter_2_2: Chapter_2_2, chapter_2_3: Chapter_2_3, chapter_2_4: Chapter_2_4):
+        percent_A = chapter_2_3.total_time_A / chapter_2_3.total_time
+        percent_B = chapter_2_3.total_time_B / chapter_2_3.total_time
+        percent_C = chapter_2_3.total_time_C / chapter_2_3.total_time
+
+        OS_manufacture = chapter_2_2.TO_perv * chapter_3.OS_amortisation_percent
+        OS_not_manufacture = (chapter_2_2.S_os_amortisable - chapter_2_2.TO_perv) * chapter_3.OS_amortisation_percent + chapter_2_4.NMA_amortisation
+
+        self.direct_A = DirectCosts(percent_A, chapter_2_4.S_materials_i_comp_A, chapter_2_3.FOT.variable, chapter_2_3.FOT_fee.variable, OS_manufacture)
+        self.direct_B = DirectCosts(percent_B, chapter_2_4.S_materials_i_comp_B, chapter_2_3.FOT.variable, chapter_2_3.FOT_fee.variable, OS_manufacture)
+        self.direct_C = DirectCosts(percent_C, chapter_2_4.S_materials_i_comp_C, chapter_2_3.FOT.variable, chapter_2_3.FOT_fee.variable, OS_manufacture)
+
+        self.direct_total = chapter_2_4.costs['material_main'].total + chapter_2_3.FOT.variable + chapter_2_3.FOT_fee.variable + OS_manufacture
+
+        self.indirect = Table('n', 'name', 'cost')
+
+        self.indirect.add_row('1', 'Вспомогательные материалы', WorkAndOther(chapter_2_4.costs['helper'].total * 0.6, chapter_2_4.costs['helper'].total * 0.4))
+        self.indirect.add_row('2', 'Транспортно-заготовительные расходы', WorkAndOther(other=chapter_2_4.costs['move save'].total))
+        self.indirect.add_row('3', 'Инструменты, инвентарь, хозяйственные принадлежности',
+                              WorkAndOther(chapter_2_4.costs['inventory'].total * 0.8, chapter_2_4.costs['inventory'].total * 0.2))
+        self.indirect.add_row('4', 'Топливо и энергия', WorkAndOther(chapter_2_4.costs['fuel tech'].total, chapter_2_4.costs['fuel non tech'].total))
+        self.indirect.add_row('', '    на технологические цели', WorkAndOther(chapter_2_4.costs['fuel tech'].total))
+        self.indirect.add_row('', '    на нетехнологические цели', WorkAndOther(other=chapter_2_4.costs['fuel non tech'].total))
+        self.indirect.add_row('5', 'Заработная плата служащих и вспомогательных рабочих', WorkAndOther(other=chapter_2_3.FOT.const))
+        self.indirect.add_row('6', 'Страховые взносы (на указанную заработную плату)', WorkAndOther(other=chapter_2_3.FOT_fee.const))
+        self.indirect.add_row('7', 'Амортизация основных средств (не используемая при производстве продукции) и нематериальных активов', WorkAndOther(other=OS_not_manufacture))
+        self.indirect.add_row('8', 'Затраты на ремонт оборудования', WorkAndOther(chapter_2_4.costs['OS fix'].total))
+        self.indirect.add_row('9', 'Прочие расходы', WorkAndOther(other=chapter_2_4.costs['pure extra'].total))
+
+        self.machine_time_A = initial_data.operations_A.filter_table(lambda x: len(x['name']) == 1).calculate_sum(lambda x: x['time'])
+        self.machine_time_B = initial_data.operations_B.filter_table(lambda x: len(x['name']) == 1).calculate_sum(lambda x: x['time'])
+        self.machine_time_C = initial_data.operations_C.filter_table(lambda x: len(x['name']) == 1).calculate_sum(lambda x: x['time'])
+
+        self.total_machine_time = chapter_2_1.N_pl_A * self.machine_time_A + chapter_2_1.N_pl_B * self.machine_time_B + chapter_2_1.N_pl_C * self.machine_time_C
+
+        total_indirect_work = self.indirect.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost'].work)
+        total_indirect_other = self.indirect.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost'].other)
+        self.S_m_ch = total_indirect_work / self.total_machine_time
+        self.S_sv_s_rab_ob_A = self.machine_time_A * chapter_2_1.N_pl_A * self.S_m_ch
+        self.S_sv_s_rab_ob_B = self.machine_time_B * chapter_2_1.N_pl_B * self.S_m_ch
+        self.S_sv_s_rab_ob_C = self.machine_time_C * chapter_2_1.N_pl_C * self.S_m_ch
+
+        self.k_kosv = total_indirect_other / (total_indirect_work + chapter_2_3.FOT.variable)
+
+        self.S_ne_sv_s_rab_ob_A = (chapter_2_1.N_pl_A * self.direct_A.FOT + self.S_sv_s_rab_ob_A) * self.k_kosv
+        self.S_ne_sv_s_rab_ob_B = (chapter_2_1.N_pl_B * self.direct_B.FOT + self.S_sv_s_rab_ob_B) * self.k_kosv
+        self.S_ne_sv_s_rab_ob_C = (chapter_2_1.N_pl_C * self.direct_C.FOT + self.S_sv_s_rab_ob_C) * self.k_kosv
+
+        self.S_rab_ob_A = WorkAndOther(self.machine_time_A * self.S_m_ch, self.S_ne_sv_s_rab_ob_A / max(1, chapter_2_1.N_pl_A))
+        self.S_rab_ob_B = WorkAndOther(self.machine_time_B * self.S_m_ch, self.S_ne_sv_s_rab_ob_B / max(1, chapter_2_1.N_pl_B))
+        self.S_rab_ob_C = WorkAndOther(self.machine_time_C * self.S_m_ch, self.S_ne_sv_s_rab_ob_C / max(1, chapter_2_1.N_pl_C))
+
+        self.S_A_proizv = self.direct_A.direct + self.S_rab_ob_A.total
+        self.S_B_proizv = self.direct_B.direct + self.S_rab_ob_B.total
+        self.S_C_proizv = self.direct_C.direct + self.S_rab_ob_C.total
+
+
+class Chapter_2_6:
+    __slots__ = [
+        'K_ob_sr_mk',
+        'k_ob_sr_percent',
+        'K_ob_sr_pr_zap',
+
+        'k_nz_A',
+        'k_nz_B',
+        'k_nz_C',
+        'gamma_cycle',
+        'T_cycle_A',
+        'T_cycle_B',
+        'T_cycle_C',
+        'K_ob_nez_pr_A', 'K_ob_nez_pr_B', 'K_ob_nez_pr_C',
+        'K_ob_nez_pr',
+
+        't_real',
+        'K_ob_got_prod_A', 'K_ob_got_prod_B', 'K_ob_got_prod_C',
+        'K_ob_got_prod',
+
+        'gamma_ob',
+        'K_ob_extra',
+        'K_ob_RBP',
+        'K_ob_ds',
+        'K_ob_sum',
+    ]
+
+    def __init__(self, chapter_5: Chapter_5, chapter_2_1: Chapter_2_1, chapter_2_5: Chapter_2_5):
+        mz = 0
+        for i, n in [
+            (initial_data.materials_A, chapter_2_1.N_pl_A),
+            (initial_data.materials_B, chapter_2_1.N_pl_B),
+            (initial_data.materials_C, chapter_2_1.N_pl_C)
+        ]:
+            mz += i.calculate_sum(lambda x: x['amount'] * x['cost'] * n / chapter_2_1.T_pl * x['t_zap'])
+
+        cz = 0
+        for i, n in [
+            (initial_data.accessories_A, chapter_2_1.N_pl_A),
+            (initial_data.accessories_B, chapter_2_1.N_pl_B),
+            (initial_data.accessories_C, chapter_2_1.N_pl_C)
+        ]:
+            cz += i.calculate_sum(lambda x: x['amount'] * x['cost'] * n / chapter_2_1.T_pl * x['t_zap'])
+
+        self.K_ob_sr_mk = round(mz + cz, 2)
+        self.k_ob_sr_percent = chapter_5.k_ob_sr_percent
+        self.K_ob_sr_pr_zap = round((1 + self.k_ob_sr_percent) * self.K_ob_sr_mk, 2)
+        self.k_nz_A = (chapter_2_4.S_materials_i_comp_A + chapter_2_5.S_A_proizv) / (chapter_2_5.S_A_proizv * 2)
+        self.k_nz_B = (chapter_2_4.S_materials_i_comp_B + chapter_2_5.S_B_proizv) / (chapter_2_5.S_B_proizv * 2)
+        self.k_nz_C = (chapter_2_4.S_materials_i_comp_C + chapter_2_5.S_C_proizv) / (chapter_2_5.S_C_proizv * 2)
+
+        self.gamma_cycle = chapter_5.gamma_cycle
+
+        ml = self.gamma_cycle / (chapter_2_1.C * chapter_2_1.D) * chapter_2_1.T_pl / (chapter_2_1.T_pl - chapter_2_1.B)
+
+        self.T_cycle_A = round(initial_data.operations_A.calculate_sum(lambda x: x['time']) * ml, 3)
+        self.T_cycle_B = round(initial_data.operations_B.calculate_sum(lambda x: x['time']) * ml, 3)
+        self.T_cycle_C = round(initial_data.operations_C.calculate_sum(lambda x: x['time']) * ml, 3)
+
+        self.K_ob_nez_pr_A = chapter_2_5.S_A_proizv * chapter_2_1.N_pl_A / chapter_2_1.T_pl * self.k_nz_A * self.T_cycle_A
+        self.K_ob_nez_pr_B = chapter_2_5.S_B_proizv * chapter_2_1.N_pl_B / chapter_2_1.T_pl * self.k_nz_B * self.T_cycle_B
+        self.K_ob_nez_pr_C = chapter_2_5.S_C_proizv * chapter_2_1.N_pl_C / chapter_2_1.T_pl * self.k_nz_C * self.T_cycle_C
+        self.K_ob_nez_pr = round(self.K_ob_nez_pr_A + self.K_ob_nez_pr_B + self.K_ob_nez_pr_C, 2)
+
+        self.t_real = chapter_5.t_real
+        self.K_ob_got_prod_A = chapter_2_5.S_A_proizv * chapter_2_1.N_pl_A / chapter_2_1.T_pl * self.t_real
+        self.K_ob_got_prod_B = chapter_2_5.S_B_proizv * chapter_2_1.N_pl_B / chapter_2_1.T_pl * self.t_real
+        self.K_ob_got_prod_C = chapter_2_5.S_C_proizv * chapter_2_1.N_pl_C / chapter_2_1.T_pl * self.t_real
+        self.K_ob_got_prod = round(self.K_ob_got_prod_A + self.K_ob_got_prod_B + self.K_ob_got_prod_C, 2)
+
+        self.gamma_ob = chapter_5.gamma_ob
+        a = round(self.K_ob_sr_pr_zap + self.K_ob_nez_pr + self.K_ob_got_prod, 2)
+        self.K_ob_sum = round(a / self.gamma_ob, 2)
+        self.K_ob_extra = round(self.K_ob_sum - a, 2)
+
+        self.K_ob_RBP = chapter_6.active_passive.K_ob_RBP
+        self.K_ob_ds = self.K_ob_sum - (self.K_ob_sr_pr_zap + self.K_ob_RBP)
+
+
+class Chapter_2_7:
+    __slots__ = [
+        'TS_real_ost',
+        'P_real_ost',
+        'S_nalogi',
+        'P_chistaya_real_ost',
+        'to_sell',
+        'P_solt_chistatya',
+        'S_sell_OS',
+        'adding',
+        'subbing',
+
+        'active_passive'
+    ]
+
+    def __init__(self, chapter_1: Chapter_1, chapter_3: Chapter_3, chapter_4: Chapter_4,
+                 chapter_7: Chapter_7, chapter_8: Chapter_8, chapter_9: Chapter_9, chapter_2_2: Chapter_2_2, chapter_2_6: Chapter_2_6):
+        self.TS_real_ost = round(chapter_4.S_b_poln.total + (chapter_7.P_fact - chapter_4.S_b_poln.total) * 0.7, 2)
+        self.P_real_ost = chapter_8.N_ost * self.TS_real_ost
+        self.S_nalogi = round(self.P_real_ost * chapter_7.tax, 2)
+        self.P_chistaya_real_ost = self.P_real_ost - self.S_nalogi
+        self.to_sell = Table('name', 'extra', 'cost')
+        s = chapter_2_2.machines.filter_table(lambda x: x['stock'] > x['need_fact'])
+        costs = 0
+        for i in s.rows:
+            r = initial_data.operations_B.find('name', i['name'])
+            if r:
+                costs += r['cost'] * (i['stock'] - i['need_fact'])
+                self.to_sell.add_row(r['name'], i['stock'] - i['need_fact'], round(r['cost'] * (1 - chapter_3.OS_amortisation_percent), 2))
+        self.S_sell_OS = round(costs * (1 - chapter_3.OS_amortisation_percent), 2)
+        self.P_solt_chistatya = round(self.S_sell_OS * (1 - chapter_7.tax), 2)
+
+        self.adding = self.P_chistaya_real_ost + self.P_solt_chistatya
+        self.subbing = chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total
+
+        ap = self.active_passive = ExtendedActivePassive('end I', 'buy TO', 'buy OS', 'sell ost', 'sell TO', 'begin II')
+
+        end_1 = ap['end I']
+        end_1.set(chapter_9.active_passive_fact, chapter_9.active_passive_fact)
+
+        buy_TO = ap['buy TO']
+        buy_TO.set(end_1.active, end_1.passive)
+        free_ds = buy_TO.active.K_ob_ds - 500_000
+        need_ds = chapter_2_2.new_machines_cost
+        trata = min(need_ds, free_ds)
+        need_ds -= trata
+        free_ds -= trata
+        zaem = need_ds
+        buy_TO.active.OS += chapter_2_2.new_machines_cost
+        buy_TO.active.K_ob_ds = free_ds + 500_000
+        buy_TO.passive.kratkosroch_zaem_sredstva += zaem
+
+        buy_OS = ap['buy OS']
+        buy_OS.set(buy_TO.active, buy_TO.passive)
+        free_ds = buy_OS.active.K_ob_ds - 500_000
+        need_ds = chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total - chapter_2_2.new_machines_cost
+        trata = min(need_ds, free_ds)
+        need_ds -= trata
+        free_ds -= trata
+        zaem = need_ds
+        buy_OS.active.OS += chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total - chapter_2_2.new_machines_cost
+        buy_OS.active.K_ob_ds = free_ds + 500_000
+        buy_OS.passive.kratkosroch_zaem_sredstva += zaem
+
+        sell_ost = ap['sell ost']
+        sell_ost.set(buy_OS.active, buy_OS.passive)
+        sell_ost.passive.neraspred_pribil += self.P_chistaya_real_ost
+        sbpr_nost = chapter_4.S_b_proizv * chapter_8.N_ost
+        sell_ost.active.K_ob_ds += sbpr_nost
+        sell_ost.active.K_ob_got_prod -= sbpr_nost
+        sell_ost.active.K_ob_ds += self.P_chistaya_real_ost
+        free_ds = max(sell_ost.active.K_ob_ds - 500_000, 0)
+        zaem_left = max(0, sell_ost.passive.kratkosroch_zaem_sredstva - free_ds)
+        sell_ost.active.K_ob_ds -= max(0, sell_ost.passive.kratkosroch_zaem_sredstva - zaem_left)
+        sell_ost.passive.kratkosroch_zaem_sredstva = zaem_left
+
+        sell_TO = ap['sell TO']
+        sell_TO.set(sell_ost.active, sell_ost.passive)
+        sell_TO.active.K_ob_ds += self.P_solt_chistatya
+        sell_TO.passive.neraspred_pribil += self.P_solt_chistatya
+        free_ds = max(sell_TO.active.K_ob_ds - 500_000, 0)
+        zaem_left = max(0, sell_TO.passive.kratkosroch_zaem_sredstva - free_ds)
+        sell_TO.active.K_ob_ds -= max(0, sell_TO.passive.kratkosroch_zaem_sredstva - zaem_left)
+        sell_TO.passive.kratkosroch_zaem_sredstva = zaem_left
+
+        begin_2 = ap['begin II']
+        begin_2.set(sell_TO.active, sell_TO.passive)
+        begin_2.active.K_ob_ds += begin_2.active.K_ob_got_prod + begin_2.active.K_ob_nez_pr
+        begin_2.active.K_ob_got_prod = 0
+        begin_2.active.K_ob_nez_pr = 0
+        delta_K_ob_extra = chapter_2_6.K_ob_extra - chapter_9.active_passive_fact.K_ob_extra
+        delta_K_ob_sr_pr_zap = chapter_2_6.K_ob_sr_pr_zap - chapter_9.active_passive_fact.K_ob_sr_pr_zap
+        begin_2.active.K_ob_sr_pr_zap = chapter_2_6.K_ob_sr_pr_zap
+        begin_2.active.K_ob_extra = chapter_2_6.K_ob_extra
+        total_delta = delta_K_ob_extra + delta_K_ob_sr_pr_zap
+        if total_delta > 0:
+            free_ds = begin_2.active.K_ob_ds - 500_000
+            need_ds = total_delta
+            trata = min(need_ds, free_ds)
+            need_ds -= trata
+            free_ds -= trata
+            zaem = need_ds
+            begin_2.active.K_ob_ds = free_ds + 500_000
+            begin_2.passive.kratkosroch_zaem_sredstva += zaem
+        else:
+            begin_2.active.K_ob_ds -= total_delta
+
+
+class Chapter_2_8:
+    __slots__ = [
+        'parametric_data',
+        'k_param_price_A', 'k_param_price_C',
+        'param_price_A', 'param_price_B', 'param_price_C',
+        'P_prodaj',
+        'k_nats',
+        'total_cost_price_A', 'total_cost_price_B', 'total_cost_price_C',
+        'k_nats_variable',
+        'costs_A', 'costs_B', 'costs_C',
+        'S_A_poln', 'S_B_poln', 'S_C_poln',
+        'S_A_sum', 'S_B_sum', 'S_C_sum',
+        'variable_cost_price_A', 'variable_cost_price_B', 'variable_cost_price_C',
+        'TS_A_plan', 'TS_B_plan', 'TS_C_plan'
+    ]
+
+    @staticmethod
+    def calc_costs(mic, helper, move_save, inventory, fuel_tech, fuel_non_tech, FOT, FOT_fee, amortisation, OS_fix, extra):
+        costs = Value('S proizv', display_name='Затраты')
+        main_materials = Value('material', display_name='Материальные затраты')
+
+        main_materials.add_child(Value('material_main', 0, mic, display_name='Основные материалы'))
+        main_materials.add_child(Value('helper', 0, helper, display_name='Вспомогательные материалы'))
+
+        ms = move_save
+        msc = ms * chapter_3.move_save_const_percent
+        msv = (ms - msc)
+        main_materials.add_child(Value('move save', msc, msv, display_name='Транспортно-заготовительные расходы'))
+
+        main_materials.add_child(Value('inventory', const=inventory, display_name='Инструменты, инвентарь'))
+
+        fuel_energy_costs = main_materials.add_child(Value('fuel total', display_name='Топливо и энергия'))
+        fuel_energy_costs.add_child(Value('fuel tech', variable=fuel_tech, display_name='Технологическое топливо и энергия'))
+        fuel_energy_costs.add_child(Value('fuel non tech', const=fuel_non_tech, display_name='Нетехнологическое топливо и энергия'))
+        costs.add_child(main_materials)
+
+        costs.add_child(FOT)
+        costs.add_child(FOT_fee)
+
+        costs.add_child(Value('amortisation', const=amortisation, display_name='Амортизация ОС и НМА'))
+
+        ec = costs.const / costs.total
+
+        ex = costs.add_child(Value('extra', display_name='Прочие затраты'))
+        ex.add_child(Value('pure extra', const=extra * ec, variable=extra * (1 - ec)))
+        ex.add_child(Value('OS fix', const=OS_fix))
+        return costs
+
+    @staticmethod
+    def calc_for_product(N, S_materials_i_comp, direct, indirect, costs, w, o):
+        A = Chapter_2_8.calc_costs(
+            S_materials_i_comp * N,
+            costs['helper'].total * (0.6 * w + 0.4 * o),
+            costs['move save'].total * o,
+            costs['inventory'].total * (0.8 * w + 0.2 * o),
+            costs['fuel tech'].total * w,
+            costs['fuel non tech'].total * o,
+            Value('fot', chapter_2_3.FOT.const * o, direct.FOT * N),
+            Value('fot fee', chapter_2_3.FOT_fee.const * o, direct.FOT_fee * N),
+            direct.amortisation * N + indirect.find('n', '7')['cost'].total * o,
+            costs['OS fix'].total * w,
+            indirect.find('n', '9')['cost'].total * o
+        )
+        return A
+
+    def __init__(self):
+        pa = self.parametric_data = Table('name', 'A', 'B', 'C', 'importance A', 'importance C', 'power')
+        pa.add_row('X1', 20, 20, 20, 0.1, 0.2, 0)
+        pa.add_row('X2', 15, 12, 10, 0.5, 0.4, 1)
+        pa.add_row('X3', 48, 60, 75, 0.4, 0.4, -1)
+
+        pa2 = pa.filter_table(lambda x: x['name'] in ['X2', 'X3'])
+        self.k_param_price_A = pa2.calculate_sum(lambda x: (x['A'] / x['B']) ** x['power'] * x['importance A'])
+        self.k_param_price_C = pa2.calculate_sum(lambda x: (x['C'] / x['B']) ** x['power'] * x['importance C'])
+        self.param_price_A = round(chapter_7.P_fact * self.k_param_price_A, 2)
+        self.param_price_B = round(chapter_7.P_fact, 2)
+        self.param_price_C = round(chapter_7.P_fact * self.k_param_price_C, 2)
+
+        self.P_prodaj = chapter_2_4.S_sum.total * chapter_10.R_production_fact
+        self.k_nats = self.P_prodaj / chapter_2_4.S_sum.total
+
+        s_kom_unit = chapter_2_4.S_kom.total / initial_data.N_pl
+
+        self.total_cost_price_A = round((chapter_2_5.S_A_proizv + s_kom_unit) * (1 + self.k_nats), 2)
+        self.total_cost_price_B = round((chapter_2_5.S_B_proizv + s_kom_unit) * (1 + self.k_nats), 2)
+        self.total_cost_price_C = round((chapter_2_5.S_C_proizv + s_kom_unit) * (1 + self.k_nats), 2)
+
+        const_S_kom_unit = s_kom_unit * chapter_4.S_kom_const_percent
+        variable_S_kom_unit = s_kom_unit * (1 - chapter_4.S_kom_const_percent)
+
+        S_sum_a = Value('S sum A')
+        S_sum_a.add_child(Value('S kom', const_S_kom_unit * chapter_2_1.N_pl_A, variable_S_kom_unit * chapter_2_1.N_pl_A))
+
+        tmt = chapter_2_5.S_sv_s_rab_ob_A + chapter_2_5.S_sv_s_rab_ob_B + chapter_2_5.S_sv_s_rab_ob_C
+        teb = chapter_2_5.S_ne_sv_s_rab_ob_A + chapter_2_5.S_ne_sv_s_rab_ob_B + chapter_2_5.S_ne_sv_s_rab_ob_C
+
+        self.costs_A = Chapter_2_8.calc_for_product(chapter_2_1.N_pl_A, chapter_2_4.S_materials_i_comp_A, chapter_2_5.direct_A,
+                                                    chapter_2_5.indirect, chapter_2_4.costs, chapter_2_5.S_sv_s_rab_ob_A / tmt, chapter_2_5.S_ne_sv_s_rab_ob_A / teb)
+        self.costs_B = Chapter_2_8.calc_for_product(chapter_2_1.N_pl_B, chapter_2_4.S_materials_i_comp_B, chapter_2_5.direct_B,
+                                                    chapter_2_5.indirect, chapter_2_4.costs, chapter_2_5.S_sv_s_rab_ob_B / tmt, chapter_2_5.S_ne_sv_s_rab_ob_B / teb)
+        self.costs_C = Chapter_2_8.calc_for_product(chapter_2_1.N_pl_C, chapter_2_4.S_materials_i_comp_C, chapter_2_5.direct_C,
+                                                    chapter_2_5.indirect, chapter_2_4.costs, chapter_2_5.S_sv_s_rab_ob_C / tmt, chapter_2_5.S_ne_sv_s_rab_ob_C / teb)
+
+        s_kom_A = chapter_2_4.S_kom.total * chapter_2_1.A_percent / (max(1, chapter_2_1.N_pl_A))
+        s_kom_B = chapter_2_4.S_kom.total * chapter_2_1.B_percent / (max(1, chapter_2_1.N_pl_B))
+        s_kom_C = chapter_2_4.S_kom.total * chapter_2_1.C_percent / (max(1, chapter_2_1.N_pl_C))
+
+        kp = chapter_4.S_kom_const_percent
+
+        self.S_A_sum = Value('S A sum')
+        self.S_A_sum.add_child(self.costs_A)
+        self.S_A_sum.add_child(Value('S_kom', s_kom_A * chapter_2_1.N_pl_A * kp, s_kom_A * chapter_2_1.N_pl_A * (1 - kp), 'Коммерческие затраты'))
+
+        self.S_B_sum = Value('S B sum')
+        self.S_B_sum.add_child(self.costs_B)
+        self.S_B_sum.add_child(Value('S_kom', s_kom_B * chapter_2_1.N_pl_B * kp, s_kom_B * chapter_2_1.N_pl_B * (1 - kp), 'Коммерческие затраты'))
+
+        self.S_C_sum = Value('S C sum')
+        self.S_C_sum.add_child(self.costs_C)
+        self.S_C_sum.add_child(Value('S_kom', s_kom_C * chapter_2_1.N_pl_C * kp, s_kom_C * chapter_2_1.N_pl_C * (1 - kp), 'Коммерческие затраты'))
+
+        self.S_A_poln = Value('S A poln')
+        self.S_A_poln.add_child(Value('proizv', self.costs_A.const / chapter_2_1.N_pl_A, self.costs_A.variable / chapter_2_1.N_pl_A))
+        self.S_A_poln.add_child(Value('S_kom', const=s_kom_A * kp, variable=s_kom_A * (1 - kp)))
+
+        self.S_B_poln = Value('S B poln')
+        self.S_B_poln.add_child(Value('proizv', self.costs_B.const / chapter_2_1.N_pl_B, self.costs_B.variable / chapter_2_1.N_pl_B))
+        self.S_B_poln.add_child(Value('S_kom', const=s_kom_B * kp, variable=s_kom_B * (1 - kp)))
+
+        self.S_C_poln = Value('S C poln')
+        self.S_C_poln.add_child(Value('proizv', self.costs_C.const / chapter_2_1.N_pl_C, self.costs_C.variable / chapter_2_1.N_pl_C))
+        self.S_C_poln.add_child(Value('S_kom', const=s_kom_C * kp, variable=s_kom_C * (1 - kp)))
+        self.k_nats_variable = (self.P_prodaj + chapter_2_4.S_sum.const) / chapter_2_4.S_sum.variable
+
+        self.variable_cost_price_A = round(self.S_A_poln.variable * (1 + self.k_nats_variable), 2)
+        self.variable_cost_price_B = round(self.S_B_poln.variable * (1 + self.k_nats_variable), 2)
+        self.variable_cost_price_C = round(self.S_C_poln.variable * (1 + self.k_nats_variable), 2)
+
+        self.TS_A_plan = max(self.param_price_A, self.total_cost_price_A, self.variable_cost_price_A)
+        self.TS_B_plan = max(self.param_price_B, self.total_cost_price_B, self.variable_cost_price_B)
+        self.TS_C_plan = max(self.param_price_C, self.total_cost_price_C, self.variable_cost_price_C)
+
+
+class Chapter_2_9:
+    __slots__ = [
+        'Q_plan_A', 'Q_plan_B', 'Q_plan_C',
+        'Q_plan',
+        'K_ob_got_prod_plan',
+        'S_pr_got_pr_plan',
+        'S_valovaya_plan',
+        'S_kom_plan',
+        'P_pr_plan_A', 'P_pr_plan_B', 'P_pr_plan_C',
+        'P_pr_plan',
+        'P_pr_do_nalogov_plan',
+        'S_prochie_dohidy_i_rashody_plan',
+        'nalog_na_pribil_plan',
+        'P_chistaya_plan'
+    ]
+
+    def __init__(self):
+        self.Q_plan_A = chapter_2_8.TS_A_plan * chapter_2_1.N_pl_A
+        self.Q_plan_B = chapter_2_8.TS_B_plan * chapter_2_1.N_pl_B
+        self.Q_plan_C = chapter_2_8.TS_C_plan * chapter_2_1.N_pl_C
+        self.Q_plan = self.Q_plan_A + self.Q_plan_B + self.Q_plan_C
+
+        self.K_ob_got_prod_plan = chapter_2_6.K_ob_got_prod
+        self.S_pr_got_pr_plan = chapter_2_4.S_pr_tek_pl - chapter_2_6.K_ob_nez_pr - self.K_ob_got_prod_plan
+
+        self.S_valovaya_plan = self.Q_plan - self.S_pr_got_pr_plan
+
+        self.S_kom_plan = chapter_2_4.S_kom.total
+
+        self.P_pr_plan_A = (
+                                   self.Q_plan_A - chapter_2_8.costs_A.total + chapter_2_6.K_ob_nez_pr_A + chapter_2_6.K_ob_got_prod_A) - chapter_2_4.S_kom.total * chapter_2_1.N_pl_A / initial_data.N_pl
+        self.P_pr_plan_B = (
+                                   self.Q_plan_B - chapter_2_8.costs_B.total + chapter_2_6.K_ob_nez_pr_B + chapter_2_6.K_ob_got_prod_B) - chapter_2_4.S_kom.total * chapter_2_1.N_pl_B / initial_data.N_pl
+        self.P_pr_plan_C = (
+                                   self.Q_plan_C - chapter_2_8.costs_C.total + chapter_2_6.K_ob_nez_pr_C + chapter_2_6.K_ob_got_prod_C) - chapter_2_4.S_kom.total * chapter_2_1.N_pl_C / initial_data.N_pl
+
+        self.P_pr_plan = self.S_valovaya_plan - self.S_kom_plan
+
+        self.S_prochie_dohidy_i_rashody_plan = chapter_8.S_prochie_dohidy_i_rashody_plan * 1.04
+        self.P_pr_do_nalogov_plan = self.P_pr_plan - self.S_prochie_dohidy_i_rashody_plan
+        self.nalog_na_pribil_plan = round(self.P_pr_do_nalogov_plan * chapter_7.tax, 2)
+
+        self.P_chistaya_plan = self.P_pr_do_nalogov_plan - self.nalog_na_pribil_plan
+
+
+class Chapter_2_10:
+    __slots__ = [
+        'K_den_sr_plan',
+        'K_den_sr_konez_plan',
+        'S_kratkosroch_zaem_sredstva_konez_plan',
+        'active_passive_plan',
+        'valid_to_cope_kz_plan',
+    ]
+
+    def __init__(self):
+        amortisation = chapter_2_4.costs['amortisation'].total
+
+        self.K_den_sr_plan = chapter_2_7.active_passive['begin II'].active.K_ob_ds + amortisation + chapter_2_9.P_chistaya_plan - (chapter_2_6.K_ob_nez_pr + chapter_2_9.K_ob_got_prod_plan)
+        if self.K_den_sr_plan - 500_000 > chapter_2_7.active_passive['begin II'].passive.kratkosroch_zaem_sredstva:
+            self.K_den_sr_konez_plan = self.K_den_sr_plan - chapter_2_7.active_passive['begin II'].passive.kratkosroch_zaem_sredstva
+            self.S_kratkosroch_zaem_sredstva_konez_plan = 0
+            self.valid_to_cope_kz_plan = 'full'
+        elif self.K_den_sr_plan > 500_000:
+            self.K_den_sr_konez_plan = 500_000
+            self.S_kratkosroch_zaem_sredstva_konez_plan = chapter_2_7.active_passive['begin II'].passive.kratkosroch_zaem_sredstva - (self.K_den_sr_plan - 500_000)
+            self.valid_to_cope_kz_plan = 'part'
+        else:
+            self.S_kratkosroch_zaem_sredstva_konez_plan = chapter_2_7.active_passive['begin II'].passive.kratkosroch_zaem_sredstva
+            self.K_den_sr_konez_plan = self.K_den_sr_plan
+            self.valid_to_cope_kz_plan = 'none'
+
+        p = self.active_passive_plan = ActivePassive()
+
+        p.NMA = chapter_2_7.active_passive['begin II'].active.NMA - chapter_2_4.costs['amortisation NMA'].total
+        p.OS = chapter_2_2.S_os - chapter_2_4.costs['amortisation OS'].total
+
+        p.K_ob_sr_pr_zap = chapter_2_6.K_ob_sr_pr_zap
+        p.K_ob_nez_pr = chapter_2_6.K_ob_nez_pr
+        p.K_ob_got_prod = chapter_2_6.K_ob_got_prod
+        p.K_ob_RBP = chapter_2_7.active_passive['begin II'].active.K_ob_RBP
+        p.K_ob_extra = chapter_2_7.active_passive['begin II'].active.K_ob_extra
+        p.K_ob_ds = self.K_den_sr_konez_plan
+
+        p.ustavnoy_kapital = chapter_2_7.active_passive['begin II'].passive.ustavnoy_kapital
+        p.neraspred_pribil = chapter_2_7.active_passive['begin II'].passive.neraspred_pribil + chapter_2_9.P_chistaya_plan
+
+        p.doldosroch_zaemn_sredstva = chapter_2_7.active_passive['begin II'].passive.doldosroch_zaemn_sredstva
+
+        p.kratkosroch_zaem_sredstva = self.S_kratkosroch_zaem_sredstva_konez_plan
+        p.kratkosroch_prochee = chapter_2_7.active_passive['begin II'].passive.kratkosroch_prochee
+
+
+class Chapter_2_11:
+    __slots__ = [
+        'k_sob_ob_sr_plan',
+        'k_obespech_sob_sr_plan',
+        'k_abs_likvid_plan',
+        'k_tek_likvid_plan',
+        'V',
+        'OS_year_mean',
+        'k_FO_plan',
+        'k_FE_plan',
+        'Z_ob_sr_year_mean_plan',
+        'Z_ob_plan',
+        'S_sobstv_cap_year_mean_plan',
+        'k_oborach_sobstv_capital_plan',
+        'R_production_plan',
+        'R_sell_plan',
+        'R_active_plan',
+        'R_sobstv_capital_plan',
+
+        'N_kr_A', 'Q_kr_A', 'k_pokr_A', 'Q_fin_pr_A', 'proizv_richag_A',
+        'N_kr_B', 'Q_kr_B', 'k_pokr_B', 'Q_fin_pr_B', 'proizv_richag_B',
+        'N_kr_C', 'Q_kr_C', 'k_pokr_C', 'Q_fin_pr_C', 'proizv_richag_C',
+    ]
+
+    def __init__(self):
+        self.k_sob_ob_sr_plan = chapter_2_10.active_passive_plan.r2 - chapter_2_10.active_passive_plan.r5
+
+        self.k_obespech_sob_sr_plan = self.k_sob_ob_sr_plan / chapter_2_10.active_passive_plan.r2
+
+        self.k_abs_likvid_plan = chapter_2_10.active_passive_plan.K_ob_ds / chapter_2_10.active_passive_plan.r5
+
+        self.k_tek_likvid_plan = chapter_2_10.active_passive_plan.r2 / chapter_2_10.active_passive_plan.r5
+
+        self.V = initial_data.N_pl / chapter_2_3.R_ppp
+
+        self.OS_year_mean = round(chapter_2_2.S_os_amortisable - chapter_2_4.costs['amortisation OS'].total * 0.5, 2)
+        self.k_FO_plan = chapter_2_9.Q_plan / self.OS_year_mean
+
+        self.k_FE_plan = 1 / self.k_FO_plan
+
+        self.Z_ob_sr_year_mean_plan = round((chapter_2_7.active_passive['begin II'].active.r2 + chapter_2_10.active_passive_plan.r2) * 0.5, 2)
+        self.Z_ob_plan = chapter_2_9.Q_plan / self.Z_ob_sr_year_mean_plan
+
+        self.S_sobstv_cap_year_mean_plan = round((chapter_2_7.active_passive['begin II'].passive.r3 + chapter_2_10.active_passive_plan.r3) * 0.5, 2)
+        self.k_oborach_sobstv_capital_plan = chapter_2_9.Q_plan / self.S_sobstv_cap_year_mean_plan
+
+        self.R_production_plan = chapter_2_9.P_pr_plan / chapter_2_4.S_sum.total
+        self.R_sell_plan = chapter_2_9.P_chistaya_plan / chapter_2_9.Q_plan
+        self.R_active_plan = chapter_2_9.P_chistaya_plan / chapter_2_10.active_passive_plan.active
+        self.R_sobstv_capital_plan = chapter_2_9.P_chistaya_plan / self.S_sobstv_cap_year_mean_plan
+
+        self.N_kr_A = math.ceil(chapter_2_8.S_A_sum.const / (chapter_2_8.TS_A_plan - chapter_2_8.S_A_poln.variable))
+        self.Q_kr_A = self.N_kr_A * chapter_2_8.TS_A_plan
+        self.k_pokr_A = (chapter_2_8.TS_A_plan - chapter_2_8.S_A_poln.variable) / chapter_2_8.TS_A_plan
+        self.Q_fin_pr_A = (chapter_2_9.Q_plan_A - self.Q_kr_A) / chapter_2_9.Q_plan_A
+        self.proizv_richag_A = (chapter_2_9.Q_plan_A - chapter_2_8.S_A_sum.variable) / chapter_2_9.P_pr_plan_A
+
+        self.N_kr_B = math.ceil(chapter_2_8.S_B_sum.const / (chapter_2_8.TS_B_plan - chapter_2_8.S_B_poln.variable))
+        self.Q_kr_B = self.N_kr_B * chapter_2_8.TS_B_plan
+        self.k_pokr_B = (chapter_2_8.TS_B_plan - chapter_2_8.S_B_poln.variable) / chapter_2_8.TS_B_plan
+        self.Q_fin_pr_B = (chapter_2_9.Q_plan_B - self.Q_kr_B) / chapter_2_9.Q_plan_B
+        self.proizv_richag_B = (chapter_2_9.Q_plan_B - chapter_2_8.S_B_sum.variable) / chapter_2_9.P_pr_plan_B
+
+        self.N_kr_C = math.ceil(chapter_2_8.S_C_sum.const / (chapter_2_8.TS_C_plan - chapter_2_8.S_C_poln.variable))
+        self.Q_kr_C = self.N_kr_C * chapter_2_8.TS_C_plan
+        self.k_pokr_C = (chapter_2_8.TS_C_plan - chapter_2_8.S_C_poln.variable) / chapter_2_8.TS_C_plan
+        self.Q_fin_pr_C = (chapter_2_9.Q_plan_C - self.Q_kr_C) / chapter_2_9.Q_plan_C
+        self.proizv_richag_C = (chapter_2_9.Q_plan_C - chapter_2_8.S_C_sum.variable) / chapter_2_9.P_pr_plan_C
 
 
 initial_data = InitialData()
@@ -1035,6 +1866,14 @@ chapter_10 = Chapter_10(initial_data, chapter_1, chapter_2, chapter_3, chapter_4
 chapter_2_1 = Chapter_2_1(initial_data)
 chapter_2_2 = Chapter_2_2(initial_data, chapter_1, chapter_2_1, chapter_3)
 chapter_2_3 = Chapter_2_3(chapter_2, chapter_2_1)
+chapter_2_4 = Chapter_2_4(initial_data, chapter_3, chapter_4, chapter_2_1, chapter_2_3)
+chapter_2_5 = Chapter_2_5(initial_data, chapter_3, chapter_2_1, chapter_2_2, chapter_2_3, chapter_2_4)
+chapter_2_6 = Chapter_2_6(chapter_5, chapter_2_1, chapter_2_5)
+chapter_2_7 = Chapter_2_7(chapter_1, chapter_3, chapter_4, chapter_7, chapter_8, chapter_9, chapter_2_2, chapter_2_6)
+chapter_2_8 = Chapter_2_8()
+chapter_2_9 = Chapter_2_9()
+chapter_2_10 = Chapter_2_10()
+chapter_2_11 = Chapter_2_11()
 
 
 def gen_first_list():
@@ -1135,7 +1974,8 @@ def gen_1_1():
 
     add_formula(
         f'F_{{об.эф.}} = ({chapter.T_pl} - {chapter.B}) \\cdot {chapter.C} \\cdot '
-        f'{chapter.D} \\cdot (1-{chapter.gamma}) = {fn(chapter.F_ob_ef)} час./период').add_run().add_break(WD_BREAK.PAGE)
+        f'{chapter.D} \\cdot (1-{chapter.gamma}) = {fn(chapter.F_ob_ef)} час./период')
+    dp()
 
     dp('После этого найдём само число оборудования', main_text)
     add_formula_with_description('n_{об.k_{расч.}} = \\frac{N_{пл} t_j}{\\beta_{норм} F_{об.эф.}}', [
@@ -1147,9 +1987,8 @@ def gen_1_1():
 
     dp('Таблица 1.1, Расчет потребности в технологическом оборудовании', table_name_text)
     add_table(
-        [
-            ['Операция', 'Расчётное число оборудования', 'Принятое число оборудования', 'Фактический коэффициент нагрузки оборудования']
-        ] + [[e['name'], fn(e['n rasch']), fn(e['n fact'], 0), fn(e['b_fact'])] for e in chapter_1.machines.rows],
+        [['Операция', 'Расчётное число оборудования', 'Принятое число оборудования', 'Фактический коэффициент нагрузки оборудования']] +
+        [[e['name'], fn(e['n rasch']), fn(e['n fact'], 0), fn(e['b_fact'])] for e in chapter_1.machines.rows],
         [Cm(4), Cm(4), Cm(4), Cm(4)], True)
     dp()
     dp(
@@ -1164,7 +2003,6 @@ def gen_1_1():
         sm.append(f"{e['cost'] // 1000} \\cdot {e['n fact']}")
 
     add_formula('ТО_{перв} = \\sum^{m}_{i}{ТО_{перв i} n_{об i_{прин}}} = ' + ' + '.join(sm) + f' = {fn(chapter.TO_perv // 1000)} [тыс.руб.]', style=formula_style_12)
-    document.add_page_break()
 
     dp('1.2 Стоимостная структура основных средств', title_text)
     dp('Таблица 1.2, стоимостная структура основных средств', table_name_text)
@@ -1234,67 +2072,12 @@ def gen_1_2():
     document.add_page_break()
 
     dp('Таблица 2.2.1, состав, структура и заработная плата персонала', table_name_text)
-    table = add_table(
-        [
-            [
-                'Должность',
-                'Число сотрудников',
-                'Тарифная ставка, руб./мес.',
-                'Надбавки, руб./мес.',
-                'Стимулирующие выплаты, руб./мес.',
-                'Категория исполнителей',
-                'Система оплаты',
-            ]
-        ] +
-        [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in chapter_2.sl.rows] +
-        [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in chapter_2.vpr.rows] +
-        [['Рабочий', str(chapter_2.R_opr), fn(chapter_2.opr_salary), fn(chapter_2.opr_extra, 0),
-          fn(round(chapter_2.opr_salary / 12), 0), 'ОПР', 'Сдельная']],
-        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(2.25), Cm(3), Cm(2.0), Cm(2.1)],
-        style=table_style_12
-    )
+    add_employee_structure_table(chapter_2)
 
-    table.cell(1, 5).merge(table.cell(len(chapter_2.sl), 5))
-    table.cell(1, 5).paragraphs[0].add_run('Служащие')
-
-    table.cell(1 + len(chapter_2.sl), 5).merge(table.cell(1 + len(chapter_2.sl) + len(chapter_2.vpr) - 1, 5))
-    table.cell(1 + len(chapter_2.sl), 5).paragraphs[0].add_run('ВПР')
-
-    table.cell(1, 6).merge(table.cell(1 + len(chapter_2.sl) + len(chapter_2.vpr) - 1, 6))
-    table.cell(1, 6).paragraphs[0].add_run('Повременная')
     document.add_page_break()
 
     dp('Таблица 2.2.2, суммарные заработные платы персонала за год', table_name_text)
-    table = add_table(
-        [
-            [
-                'Должность',
-                'Число сотрудников',
-                'Тарифная ставка, руб./год',
-                'Надбавки, руб./год',
-                'Стимулирующие выплаты, руб./год',
-                'Итого, руб./год'
-            ]
-        ] +
-        [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in chapter_2.sl.rows] +
-        [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in chapter_2.vpr.rows] +
-        [['Рабочий', str(chapter_2.R_opr), fn(chapter_2.opr_salary * 12, 0), fn(chapter_2.opr_extra * 12, 0),
-          fn(chapter_2.opr_salary, 0), fn(chapter_2.FOT_opr + chapter_2.FOT_opr_extra, 0)]],
-        [Cm(3.7), Cm(2), Cm(2.15), Cm(2.7), Cm(3), Cm(2.25), Cm(1.9)],
-        style=table_style_12
-    )
-    r = table.add_row()
-    r.cells[0].paragraphs[0].add_run('Итого').bold = True
-    r.cells[1].paragraphs[0].add_run(fn(chapter_2.sl.calc_sum(lambda e, _: e) + chapter_2.vpr.calc_sum(lambda e, _: e) + chapter_2.R_opr, 0)).bold = True
-    r.cells[2].paragraphs[0].add_run(fn(chapter_2.sl.calc_sum(lambda e, c: e * c * 12) + chapter_2.vpr.calc_sum(lambda e, c: e * c * 12) + chapter_2.FOT_opr, 0)).bold = True
-    r.cells[3].paragraphs[0].add_run(fn(chapter_2.R_opr * chapter_2.opr_extra * 12, 0)).bold = True
-    r.cells[4].paragraphs[0].add_run(
-        fn(chapter_2.stimulating_salary_percent * (
-                chapter_2.sl.calc_sum(lambda e, c: e * c) +
-                chapter_2.vpr.calc_sum(lambda e, c: e * c) +
-                chapter_2.R_opr * chapter_2.opr_salary
-        ), 0)).bold = True
-    r.cells[5].paragraphs[0].add_run(fn(chapter_2.FOT.total)).bold = True
+    add_employee_salary_table(chapter_2)
 
     dp()
     dp(f'Отметим, что ОПР получают сдельную зарплату за {fn(chapter_2.R_opr_raw)} чел., но на предприятии их трудится {chapter_2.R_opr}, поэтому каждый из них получит меньше, '
@@ -1309,7 +2092,7 @@ def gen_1_2():
         'ФОТ_{ОПР} = ФОТ_{ОПР} + R_{ОПР} \\cdot (ОПР_{надб.} \\cdot 12 + ОПР_{тариф.ст.}) = ' +
         f'{chapter_2.R_opr} \\cdot ({fn(chapter_2.opr_extra)} \\cdot 12 + {fn(chapter_2.opr_salary)} = {fn(chapter_2.FOT_opr + chapter_2.FOT_opr_extra)} [руб./год]')
     dp('ФОТ ВПР и служащих:')
-    p = add_formula_with_description('ФОТ_{ВПР+сл} = \\sum_{i}^{n}{(ТС_i \\cdot N_i \\cdot 12 + ТС_i)} = ' + f'{fn(chapter_2.FOT_vpr + chapter_2.FOT_sl)}', [
+    add_formula_with_description('ФОТ_{ВПР+сл} = \\sum_{i}^{n}{(ТС_i \\cdot N_i \\cdot 12 + ТС_i)} = ' + f'{fn(chapter_2.FOT_vpr + chapter_2.FOT_sl)}', [
         ['n', 'число ОПР и служащих'],
         ['ТС_i', 'тарифная ставка'],
         ['N_i', 'численнойсть']
@@ -1498,7 +2281,7 @@ def gen_1_4():
         ['S у-п, руб./год'] + [fn(e) for e in S_const_costs],
         ['S перем, руб./год'] + [fn(e) for e in S_variable_costs],
         ['S сум, руб./год'] + [fn(e) for e in S_total_costs],
-    ], style=table_style_10)
+        ], style=table_style_10)
     document.add_page_break()
 
     dp('Таблица 4.3.3, зависимость себестоимости единицы продукции от величины объема производства за планируемый период', table_name_text)
@@ -1507,7 +2290,7 @@ def gen_1_4():
         ['B у-п, руб./год'] + [fn(e) for e in B_const_costs],
         ['B перем, руб./год'] + [fn(e) for e in B_variable_costs],
         ['B сум, руб./год'] + [fn(e) for e in B_total_costs],
-    ], style=table_style_10)
+        ], style=table_style_10)
 
     dp('График 4.3.4, зависимости общей суммы и себестоимости единицы продукции от величины объёма производства за планируемый период', table_name_text)
     plt.figure(figsize=(10, 4))
@@ -1806,7 +2589,7 @@ def gen_1_8():
         ['Выручка', fn(chapter_8.Q_plan), fn(chapter_8.Q_fact)],
         ['Себестоимость продаж (проданной готовой продукции)', fn(chapter_8.S_pr_got_pr_plan), fn(chapter_8.S_pr_got_pr_fact)],
         ['Валовая прибыль (убыток)', fn(chapter_8.S_valovaya_plan), fn(chapter_8.S_pr_got_pr_fact)],
-        ['Коммерческие расходы', fn(chapter_8.S_kom_plan), fn(chapter_8.S_kom_plan)],
+        ['Коммерческие расходы', fn(chapter_8.S_kom_plan), fn(chapter_8.S_kom_fact)],
         ['Прибыль (убыток) от продаж', fn(chapter_8.P_pr_plan), fn(chapter_8.P_pr_fact)],
         ['Прочие доходы ', fn(0), fn(0)],
         ['Прочие расходы', fn(chapter_8.S_prochie_dohidy_i_rashody_plan), fn(chapter_8.S_prochie_dohidy_i_rashody_fact)],
@@ -2029,14 +2812,14 @@ def gen_1_10():
             ['Нераспределенная прибыль, [руб.]', fn(chapter_9.active_passive_plan.neraspred_pribil), fn(chapter_9.active_passive_fact.neraspred_pribil)],
             ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_10.V), fn(chapter_10.V)],
             ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_10.OS_year_mean), fn(chapter_10.OS_year_mean)],
-            ['Коэффициент фондоотдачи', fn(chapter_10.k_FO_plan), fn(chapter_10.k_FO_fact)],
-            ['Коэффициент фондоемкости', fn(chapter_10.k_FE_plan), fn(chapter_10.k_FE_fact)],
+            ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_10.k_FO_plan), fn(chapter_10.k_FO_fact)],
+            ['Коэффициент фондоемкости [руб.]', fn(chapter_10.k_FE_plan), fn(chapter_10.k_FE_fact)],
             ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_sr_year_mean_plan), fn(chapter_10.Z_ob_sr_year_mean_fact)],
             ['Оборачиваемость собственного капитала', fn(chapter_10.k_oborach_sobstv_capital_plan), fn(chapter_10.k_oborach_sobstv_capital_fact)],
             ['Рентабельность продукции', fn(chapter_10.R_production_plan), fn(chapter_10.R_production_fact)],
             ['Рентабельность продаж', fn(chapter_10.R_sell_plan), fn(chapter_10.R_sell_fact)],
-            ['Рентабельность активов', fn(chapter_10.R_active_plan), fn(chapter_10.R_active_fact)],
-            ['Рентабельность собственного капитала', fn(chapter_10.R_sobstv_capital_plan), fn(chapter_10.R_sobstv_capital_fact)],
+            ['Рентабельность активов [1/год]', fn(chapter_10.R_active_plan), fn(chapter_10.R_active_fact)],
+            ['Рентабельность собственного капитала [1/год]', fn(chapter_10.R_sobstv_capital_plan), fn(chapter_10.R_sobstv_capital_fact)],
         ], [Cm(9.25), Cm(3.75), Cm(3.75)], True, style=table_style_12)
 
         document.add_page_break()
@@ -2078,14 +2861,14 @@ def gen_1_10():
     add_formula('E_{пр.\\ рыч.} = \\frac{Маржинальная\\ прибыль}{Прибыль\\ от\\ продаж}')
     add_formula(
         'E_{пр.\\ рыч.\\ план} = \\frac{ ' +
-        f'{fn(chapter_8.Q_plan)} - {chapter_4.S_sum.total} }}{{ {fn(chapter_8.P_pr_plan)} }} = {fn(chapter_10.proizv_richag_plan)}')
+        f'{fn(chapter_8.Q_plan)} - {chapter_4.S_sum.variable} }}{{ {fn(chapter_8.P_pr_plan)} }} = {fn(chapter_10.proizv_richag_plan)}')
     add_formula(
         'E_{пр.\\ рыч.\\ факт} = \\frac{ ' +
         f'{fn(chapter_8.Q_plan)} - {fn(chapter_4.S_b_poln.variable)} \\cdot {fn(chapter_8.N_fact)} }}{{ {fn(chapter_8.P_pr_fact)} }} = {fn(chapter_10.proizv_richag_fact)}')
 
     document.add_page_break()
 
-    dp('График 10, рентабельность изделия Б')
+    dp('График 10, рентабельность изделия Б', table_name_text)
 
     plt.figure(figsize=(8, 8))
     plt.subplot(1, 1, 1)
@@ -2264,11 +3047,11 @@ def gen_2_2():
         [[e['n'], e['name'], fn(e['cost I'], 0), fn(e['amortisation I'], 0),
           fn(e['cost II begin'], 0), fn(e['delta'], 0), fn(e['cost II'], 0), fn(e['cost II'] / chapter_2_2.S_os * 100, 1)] for e in chapter_2_2.main_resources.rows] +
         [[None, 'Итого',
-          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost I']), 0),
-          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['amortisation I']), 0),
-          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost II begin']), 0),
-          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['delta']), 0),
-          fn(chapter_2_2.main_resources.calculate_sum(lambda x: x['cost II']), 0),
+          fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost I']), 0),
+          fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['amortisation I']), 0),
+          fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost II begin']), 0),
+          fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['delta']), 0),
+          fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost II']), 0),
           None]],
         [Cm(0.7), Cm(3.8), Cm(2.25), Cm(2.25), Cm(2.25), Cm(2.25), Cm(3.25), Cm(1.0)],
         first_bold=True, style=table_style_10
@@ -2279,6 +3062,950 @@ def gen_2_2():
 def gen_2_3():
     dp('3. Дополнительная потребность в промышленно-производственном персонале', title_text)
     dp('Рассчитаем численность ППП, ФОТ, страховые взносы аналогично первому периоду. Оклады остаются неизменными')
+
+    dp('Чтобы найти численность ОПР найдём в начале эффективный фонд времени одного работающего:')
+    add_formula_with_description(
+        'F_{раб_{эф}}=(T_{пл}-B-O-H) \\cdot D = ' +
+        f"({chapter_2_1.T_pl}-{chapter_2_1.B}-{chapter_2_1.O}-{chapter_2_1.H}) \\cdot {chapter_2_1.D} = {chapter_2_3.F_rab_ef}\\ [час/год\\ чел.]",
+        [
+            ['O', f'продолжительность отпуска = {chapter_2_1.H} раб. дн.'],
+            ['H', f'число планируемых невыходов = {chapter_2_1.O} раб. дн.'],
+        ],
+        style=formula_style_12)
+    dp('Примем величину планируемых невыходов за 20 (производство изделий на токарных станках негативно сказывается на здоровье за счёт мелкодисперсной '
+       'металлической стружки, переменных магнитных полей электродвигателей и так далее), отпуск 20 рабочих дней (28 – 8 нерабочих дней за 4 недели).')
+
+    dp('Подставим полученное значение в формулу численности ОПР:')
+
+    add_formula_with_description(
+        'R_{ОПР}=\\frac{N_{плА,Б,В} \\sum_{i}^{m}{t_{техн\\ i\\ А,Б,В}}}{F_{раб_{эф}} k_{вн}} =' + f'{chapter_2_3.R_opr}\\ [чел.]',
+        [['t_{техн\\ i\\ А,Б,В}', 'трудоёмкость i-той операции изделия А, Б, В']]
+    )
+
+    dp()
+    p = dp(f'Численность ВРП примем за {fn(chapter_2_3.R_vpr / chapter_2_3.R_opr)} R')
+    p.add_run('ОПР').font.subscript = True
+    p.add_run(', а численность служащих за 0.6R')
+    p.add_run('ОПР').font.subscript = True
+    p.add_run(':')
+
+    add_formula('R_{ВПР} = ' + fn(chapter_2_3.R_vpr / chapter_2_3.R_opr) + 'R_{ОПР} = ' + f'{chapter_2_3.R_vpr}')
+    add_formula('R_{СЛ} = ' + fn(chapter_2_3.R_sl / chapter_2_3.R_opr) + 'R_{ОПР} = ' + f'{chapter_2_3.R_sl}')
+
+    dp('Численность ППП:')
+    p = add_formula('R_{ППП} = R_{ОПР} + R_{ВПР} + R_{СЛ} = ' + f'{chapter_2_3.R_opr} + {chapter_2_3.R_vpr} + {chapter_2_3.R_sl} = {chapter_2_3.R_ppp}')
+    p.runs[0].add_break(WD_BREAK.PAGE)
+
+    dp('Таблица 23.1, состав, структура и заработная плата персонала', table_name_text)
+    add_employee_structure_table(chapter_2_3)
+    document.add_page_break()
+    dp('Таблица 23.2, суммарные заработные платы персонала за год', table_name_text)
+    add_employee_salary_table(chapter_2_3)
+    dp()
+    dp(f'Отметим, что ОПР получают сдельную зарплату за {fn(chapter_2_3.R_opr_raw)} чел., но на предприятии их трудится {chapter_2_3.R_opr}, поэтому каждый из них получит меньше, '
+       f'но их суммарная з/п будет равна ФОТ ОПР.').add_run().add_break(WD_BREAK.PAGE)
+
+    dp('Найдём ФОТ ОПР на год:')
+    add_formula('ФОТ_{ОПР без надб.} = p_{ср} N_{пл} m = ' + f'{fn(chapter_2_3.FOT_opr)}\\ [руб./год]')
+
+    dp()
+    dp('Учтём надбавки ОПР:')
+    add_formula(
+        'ФОТ_{ОПР} = ФОТ_{ОПР} + R_{ОПР} \\cdot (ОПР_{надб.} \\cdot 12 + ОПР_{тариф.ст.}) = ' +
+        f'{chapter_2_3.R_opr} \\cdot ({fn(chapter_2_3.opr_extra)} \\cdot 12 + {fn(chapter_2_3.opr_salary)} = {fn(chapter_2_3.FOT_opr + chapter_2_3.FOT_opr_extra)}\\ [руб./год]')
+
+    dp()
+    dp('ФОТ ВПР и служащих:')
+    add_formula_with_description('ФОТ_{ВПР+сл} = \\sum_{i}^{n}{(ТС_i \\cdot N_i \\cdot 12 + ТС_i)} = ' + f'{fn(chapter_2_3.FOT_vpr + chapter_2_3.FOT_sl)}', [
+        ['n', 'число ОПР и служащих'],
+        ['ТС_i', 'тарифная ставка'],
+        ['N_i', 'численнойсть']
+    ])
+
+    dp()
+    dp('Общий ФОТ:')
+    add_formula('ФОТ_{общ} = ФОТ_{ОПР} + ФОТ_{ВПР+сл} = ' + f'{fn(chapter_2_3.FOT.total)}')
+
+    dp()
+    dp('Таблица 2.3, страховые взносы', table_name_text)
+    table = add_table([['Взнос', 'Величина, %', 'Сумма, руб./год']] + [[e.name, fn(e.percent * 100, 1), fn(e.amount)] for e in chapter_2_3.insurance_fee.rows])
+    r = table.add_row()
+    r.cells[0].merge(r.cells[1])
+    r.cells[0].paragraphs[0].add_run('Итого').bold = True
+    r.cells[2].paragraphs[0].add_run(fn(chapter_2_3.FOT_fee.total)).bold = True
+    dp()
+    dp('Выводы: ')
+    document.add_page_break()
+
+
+def gen_2_4():
+    dp('4. Суммарные затраты на производство и реализацию продукции', title_text)
+    dp('Для определения затрат на производство необходимо определить дополнительную потребность в материалах и комплектующих изделиях')
+    dp()
+    dp('4.1. Дополнительная потребность в материалах и комплектующих изделиях', subtitle_text)
+    dp('См 2 пункт II раздела')
+    dp('Стоимость материалов и комплектующих:')
+    dp(f'А: {fn(chapter_2_4.S_materials_i_comp_A)} [руб./шт.]')
+    dp(f'Б: {fn(chapter_3.S_mat_i_comp)} [руб./шт.]')
+    dp(f'В: {fn(chapter_2_4.S_materials_i_comp_C)} [руб./шт.]')
+
+    dp()
+    dp('Смета затрат на производство:')
+    dp('1. Стоимость основных материалов')
+    add_formula('S_{ом} = ' + f'{fn(chapter_2_4.costs["material_main"].total)}  [руб./год]')
+
+    dp(f'2. Стоимость вспомогательных материалов (принято за {fn(chapter_3.help_materials_percent * 100)}% от *)')
+    add_formula('S_{вм} = S_{ом} \\cdot k_{вм} = ' + f'{fn(chapter_2_4.costs["helper"].total)}\\ [руб./год]')
+
+    dp(f'3. Транспортно-заготовительные расходы (принято за {fn(chapter_3.moving_save_percent * 100)}% от *)')
+    add_formula('S_{т-з} = S_{ом} \\cdot k_{т-з} = ' + f'{fn(chapter_2_4.costs["move save"].total)}\\ [руб./год]')
+    dp(f'Из них {fn(chapter_3.move_save_const_percent * 100, 0)}% - постоянные затраты {fn(chapter_2_4.costs["move save"].const)}\\ [руб./год]')
+
+    dp(f'4. Инструменты, инвентарь (принято за {fn(chapter_3.inventory_percent * 100)}% от *)')
+    add_formula('S_{инстр} = S_{ом} \\cdot k_{интср} = ' + f'{fn(chapter_2_4.costs["inventory"].total)}\\ [руб./год]')
+
+    dp(f'5. Топливо и энергия (принято за {fn(chapter_3.fuel_percent * 100)}% от *)')
+    add_formula('S_{топл +эн} = S_{ом} \\cdot k_{топл+эн} = ' + f'{fn(chapter_2_4.costs["fuel total"].total)}\\ [руб./год]')
+
+    dp(f'5.1 Технологическое ({fn(chapter_3.fuel_tech_percent * 100)}% от топлива и энергии)')
+    add_formula('S_{тех. топл + эн} = S_{топл + эн} \\cdot k_{техн} = ' + f'{fn(chapter_2_4.costs["fuel tech"].total)}\\ [руб./год]')
+    dp(f'5.2 Нетехнологическое ({fn(chapter_3.fuel_non_tech_percent * 100)}% от топлива и энергии)')
+    add_formula('S_{тех. топл + эн} = S_{топл + эн} \\cdot (1 - k_{тех.}) = ' + f'{fn(chapter_2_4.costs["fuel non tech"].total)}\\ [руб./год]')
+
+    dp('* - от стоимости основных материалов и комплектующих')
+
+    dp(f'Норму амортизации основных средств примем за {fn(chapter_3.OS_amortisation_percent * 100)}%:')
+    add_formula('A_{ос} = k_{ам.ос.} \\cdot (S_{осн.ср.} - S_{земл.}) = ' + f'{fn(chapter_2_4.OS_amortisation)}\\ [руб./год]')
+
+    document.add_page_break()
+
+    dp(f'НМА = {fn(chapter_2_4.NMA)} руб.')
+    dp(f'Норма амортизации НМА = {fn(chapter_3.NMA_amortisation_percent * 100)}% (от изначальной суммы):')
+    add_formula('A_{НМА} = k_{ам. НМА} \\cdot НМА = ' + f'{fn(chapter_2_4.NMA_amortisation)}\\ [руб./год]')
+
+    dp(f'Планируемые расходы на ремонт основных средств примем за {fn(chapter_3.OS_fix_percent * 100)}% от стоимости ОС:')
+    add_formula('S_{рем.ос} = k_{рем ос} \\cdot (S_{осн.ср.} - S_{земл.}) = ' + f'{fn(chapter_2_4.OS_fix)}\\ [руб./год]')
+
+    dp('1. Материальные затраты:')
+    add_formula('S_{мат.зат} = S_{ом} + S_{вм} + S_{т-з} S_{инстр} S_{топл.+эн.} = ' + f'{fn(chapter_2_4.costs["material"].total)}\\ [руб./год]')
+
+    dp('2. Затраты на оплату труда:')
+    add_formula('S_{ФОТ} = ' + f'{fn(chapter_2.FOT.total)}\\ [руб./год]')
+
+    dp('3. Страховые взносы:')
+    add_formula('S_{страх.вз} = ' + f'{fn(chapter_2.FOT_fee.total)}\\ [руб./год]')
+
+    dp('4. Амортизация основных средств и нематериальных активов:')
+    add_formula('A_{ОС+НМА} = A_{ос} + A_{НМА}' + f'{fn(chapter_2_4.costs["amortisation"].total)}\\ [руб./год]')
+
+    dp(f'5. Прочие затраты (примем за {fn(chapter_3.extra_percent * 100)}% от первых 4 пунктов + планируемые расходы на ремонт ОС):')
+    add_formula('S_{проч.зат.} = k_{проч.зат.} \\cdot (S_{мат.зат.} + S_{ФОТ} + S_{страх.вз} + A_{ОС+НМА}) + S_{рем.ос} = ' + f'{fn(chapter_2_4.costs["extra"].total)}\\ [руб./год]')
+
+    costs = [
+        chapter_2_4.costs['material'],
+        chapter_2_4.costs['fot'],
+        chapter_2_4.costs['fot fee'],
+        chapter_2_4.costs['amortisation'],
+        chapter_2_4.costs['extra'],
+    ]
+
+    dp()
+    dp('Таблица 24.1.1, смета затрат', table_name_text)
+    table = add_table(
+        [['№', 'Элемент сметы', 'Сумма, руб/год', '%']] +
+        [[str(i + 1), e._display_name, fn(e.total), fn(e.total / chapter_2_4.costs.total * 100)] for i, e in enumerate(costs)],
+        [Cm(1), Cm(8), Cm(4), Cm(2)]
+    )
+    r = table.add_row()
+    r.cells[0].merge(r.cells[1])
+    r.cells[0].paragraphs[0].add_run('Итого: ').bold = True
+    r.cells[0].paragraphs[0].add_run('затраты на производство в текущем периоде ')
+    add_formula('S_{пр.тек._{пл.}} ', r.cells[0].paragraphs[0])
+    r.cells[2].paragraphs[0].add_run(fn(chapter_2_4.costs.total)).bold = True
+    r.cells[3].paragraphs[0].add_run('100').bold = True
+
+    dp(f'Примем коммерческие затраты равными {fn(chapter_4.S_kom_percent * 100)}% от величины затрат на производство в текущем периоде:')
+    add_formula('S_{ком} = k_{ком} \\cdot S_{пр.тек.пл.} = ' + f'{fn(chapter_2_4.S_kom.total)} [руб./год]')
+    dp(f'Из них {fn(chapter_4.S_kom_const_percent * 100)}% составляют постоянные затраты, {fn(chapter_2_4.S_kom.const)}\\ [руб./год]')
+    dp(f'Суммарные затраты на производство: {fn(chapter_2_4.S_sum.total)} [руб.]')
+
+    document.add_page_break()
+
+
+def gen_2_5():
+    dp('5. Расчет прямых  и косвенных затрат', title_text)
+    dp('Деление затрат на прямые и косвенные произведем с целью их распределения между единицами калькулирования и исчисления фактической себестоимости каждой единицы.')
+    dp()
+    dp('5.1 Расчет прямых затрат по каждому изделию А, Б и В', subtitle_text)
+    dp('Рассчитаем прямые затраты по каждому изделию А, Б и В включив в них:')
+    dp('– стоимость материалов и комплектующих;')
+    dp('– заработную плату основных производственных рабочих, участвующих в изготовлении изделия;')
+    dp('– величину страховых взносов;')
+    dp('− сумму начисленной амортизации по основным средствам, используемые при производстве продукции.')
+
+    dp('Предполагается, что ОПР принимают участие в изготовлении всех трех наименований изделий. '
+       'Поэтому заработная плата ОПР, а также страховые взносы, распределяются по изделиям '
+       'пропорционально трудоемкости всей производственной программы')
+
+    add_formula_with_description('L\'_{ОПР j} = L\'_{ОПР\\ сум} \\frac{t_j}{\\sum^m_j{tjN_{пл.j}}}', [
+        ['L\'_{ОПР j}', 'заработная плата и страховые взносы ОПР, приходящиеся на одно j-ое изделие, руб./шт.'],
+        ['L\'_{ОПР\\ сум}', 'суммарная заработная плата и страховые взносы ОПР, руб./год.шт.'],
+        ['t_j', 'технологическая трудоёмкость j-го изделия, час./шт.'],
+        ['\\sum^m_j{tjN_{пл.j}}', 'суммарная технологическая трудоемкость производственной программы, час./год']
+    ])
+
+    dp('Сумму начисленной амортизации по основным средствам, используемым при производстве продукции, '
+       'распределим аналогичным образом (пропорционально трудоемкости всей производственной программы)')
+
+    document.add_page_break()
+    dp('Таблица 25.1.1, прямые затраты по изделиям А, Б и В', table_name_text)
+    table = add_table([
+        ['Изделие', 'А руб/год', 'Б руб/год', 'В руб/год'],
+        ['Материалы', fn(chapter_2_4.S_materials_i_comp_A), fn(chapter_2_4.S_materials_i_comp_B), fn(chapter_2_4.S_materials_i_comp_C)],
+        ['Заработная плата ОПР', fn(chapter_2_5.direct_A.FOT), fn(chapter_2_5.direct_B.FOT), fn(chapter_2_5.direct_C.FOT)],
+        ['Страховые взносы', fn(chapter_2_5.direct_A.FOT_fee), fn(chapter_2_5.direct_B.FOT_fee), fn(chapter_2_5.direct_C.FOT_fee)],
+        ['Амортизация по основным средствам, используемые при производстве продукции',
+         fn(chapter_2_5.direct_A.amortisation), fn(chapter_2_5.direct_B.amortisation), fn(chapter_2_5.direct_C.amortisation)],
+        ['Суммарные прямые затраты по изделиям', fn(chapter_2_5.direct_A.direct), fn(chapter_2_5.direct_B.direct), fn(chapter_2_5.direct_C.direct)],
+        ['Суммарные прямые затраты', fn(chapter_2_5.direct_total), None, None]
+    ], [Cm(7), Cm(3), Cm(3), Cm(3)], first_bold=True)
+    table.cell(6, 1).merge(table.cell(6, 3))
+
+    dp()
+    dp('5.2. Расчет косвенных затрат', subtitle_text)
+    dp('Для расчета косвенных затрат следует составить смету косвенных расходов, включив в нее:')
+    dp('– стоимость вспомогательных материалов;')
+    dp('– транспортно-заготовительные расходы;')
+    dp('– стоимость инструментов, инвентаря и хозяйственных принадлежностей;')
+    dp('– стоимость топлива и энергии;')
+    dp('– заработную плату служащих и вспомогательных рабочих;')
+    dp('– страховые взносы на указанную заработную плату;')
+    dp('– амортизацию основных средств по основным средствам, не используемые при производстве продукции.')
+    dp('− амортизацию нематериальных активов;')
+    dp('– прочие затраты.')
+
+    document.add_page_break()
+
+    dp('Таблица 25.2.1, смета косвенных расходов', table_name_text)
+    sm = chapter_2_5.indirect.calculate_sum(lambda x: x['cost'].total * (len(x['n']) > 0))
+    add_table(
+        [['Элемент сметы', 'Сумма, руб./год.', '%']] +
+        [[e['name'], fn(e['cost'].total), fn(e['cost'].total / sm * 100)] for e in chapter_2_5.indirect.rows] +
+        [['Итого', fn(sm), '100']],
+        [Cm(9), Cm(4.5), Cm(2.5)], first_bold=True
+    )
+
+    dp()
+    dp('5.3. Разделение косвенных затрат на связанные и не связанные с работой оборудования', subtitle_text)
+    dp('Перед отнесением косвенных затрат по соответствующим видам продукции разделим общую сумму косвенных расходов на две '
+       'составляющие косвенные затраты, связанные с работой оборудования и косвенные затраты, не связанные с работой оборудования.')
+    dp('Косвенные затраты связанные с работой оборудования включают:')
+    dp('– стоимость технологической энергии,')
+    dp('– 60% стоимости вспомогательных материалов,')
+    dp('– 80% стоимости инструментов, инвентаря, хозяйственных принадлежностей.')
+    dp('– затраты на ремонт оборудования.')
+    dp('Косвенные расходы не связанные с работой оборудования:')
+    dp('– стоимость нетехнологической энергии,')
+    dp(' – 40% стоимости вспомогательных материалов,')
+    dp('– заработная плата служащих, вспомогательных производственных рабочих (ВПР) и страховые взносы,')
+    dp('− 20% стоимости инструментов, инвентаря, хозяйственных принадлежностей.')
+    dp('– амортизационные отчисления от стоимости основных средств (кроме стоимости оборудования) и нематериальных активов,')
+    dp('– транспортно-заготовительные расходы,')
+    dp('– прочие расходы (кроме затрат на ремонт оборудования).')
+
+    dp()
+    dp('Таблица 25.3.1, распределение косвенных затрат на связанные и не связанные с работой оборудования')
+    table = add_table(
+        [['Элемент сметы', 'Связанные с работой оборудования, руб./год', 'Не связанные с работой оборудования, руб./год']] +
+        [[e['name'], fn(e['cost'].work), fn(e['cost'].other)] for e in chapter_2_5.indirect.filter(lambda x: len(x['n']) > 0)] +
+        [
+            ['Итого', fn(chapter_2_5.indirect.calculate_sum(lambda x: x['cost'].work * (len(x['n']) > 0))),
+             fn(chapter_2_5.indirect.calculate_sum(lambda x: x['cost'].other * (len(x['n']) > 0)))],
+            ['Суммарные косвенные расходы', fn(sm), None]
+        ],
+        [Cm(9), Cm(4.25), Cm(4.25)], first_bold=True
+    )
+    table.rows[-1].cells[1].merge(table.rows[-1].cells[2])
+    document.add_page_break()
+
+    dp('5.4 Распределение косвенных затрат по изделиям А, Б и В', subtitle_text)
+    dp('При распределении косвенных затрат по изделиям будем придерживаться определенного порядка:')
+    dp('Косвенные затраты, связанные с работой оборудования, распределим пропорционально машино-часам, затраченным  на обработку годового объема '
+       'выпуска каждого изделия, определив предварительно стоимость одного машино-часа.')
+
+    add_formula_with_description(
+        'S_{м-ч} = \\frac{S^{косв}_{св.\\ с\\ раб.об.}}{\\sum^k_{j=1}{N_{пл.}t\'_j}} = \\frac{' +
+        f'{fn(chapter_2_5.indirect.filter_table(lambda x: len(x["n"]) > 0).calculate_sum(lambda x: x["cost"].work))} }}'
+        f'{{ {fn(chapter_2_5.total_machine_time)} }} = {fn(chapter_2_5.S_m_ch)}\\ [руб./час]',
+        [['t\'_j', 'технологическая трудоемкость без учета ручной операции']])
+
+    dp()
+    dp('Косвенные затраты j-го изделия связанные с работой оборудования:')
+    add_formula('S^j_{св.\\ с\\ раб.об} = N_{пл.\\ j} \\cdot t\'_j \\cdot S_{м-ч}')
+
+    dp()
+    for j, n, v, g in [
+        ('A', chapter_2_1.N_pl_A, chapter_2_5.machine_time_A, chapter_2_5.S_sv_s_rab_ob_A),
+        ('Б', chapter_2_1.N_pl_B, chapter_2_5.machine_time_B, chapter_2_5.S_sv_s_rab_ob_B),
+        ('B', chapter_2_1.N_pl_C, chapter_2_5.machine_time_C, chapter_2_5.S_sv_s_rab_ob_C)
+    ]:
+        add_formula(f'S^{j}_{{св.\\ с\\ раб.об}} = N_{{пл.\\ {j} }} \\cdot t\'_{j} \\cdot S_{{м-ч}} = {fn(n, 0)} \\cdot {fn(v)} \\cdot {fn(chapter_2_5.S_m_ch)} = {fn(g)}')
+
+    dp()
+    dp('Косвенные затраты, не связанные с работой оборудования, распределим пропорционально основной заработной плате основных производственных рабочих и расходам '
+       'по содержанию и эксплуатации оборудования, определив предварительно коэффициент косвенных затрат.')
+
+    add_formula('k_{косв} = \\frac{S^{косв}_{не\\ св.\\ с\\ раб.об.}}{S^{косв}_{св.\\ с\\ раб.об.} + L_{ОПР\\ сум}} = \\frac{' +
+                f'{fn(chapter_2_5.indirect.filter_table(lambda x: len(x["n"]) > 0).calculate_sum(lambda x: x["cost"].other))}}}{{ '
+                f'{fn(chapter_2_5.indirect.filter_table(lambda x: len(x["n"]) > 0).calculate_sum(lambda x: x["cost"].work))} + '
+                f'{fn(chapter_2_3.FOT.variable)} }} = {fn(chapter_2_5.k_kosv)}')
+
+    dp()
+    for j, n, v, s, g in [
+        ('A', chapter_2_1.N_pl_A, chapter_2_5.direct_A.FOT, chapter_2_5.S_sv_s_rab_ob_A, chapter_2_5.S_ne_sv_s_rab_ob_A),
+        ('Б', chapter_2_1.N_pl_B, chapter_2_5.direct_B.FOT, chapter_2_5.S_sv_s_rab_ob_B, chapter_2_5.S_ne_sv_s_rab_ob_B),
+        ('B', chapter_2_1.N_pl_C, chapter_2_5.direct_C.FOT, chapter_2_5.S_sv_s_rab_ob_C, chapter_2_5.S_ne_sv_s_rab_ob_C)
+    ]:
+        add_formula(f'S^{j}_{{не\\ св.\\ с\\ раб.об}} = (L^{j}_{{ОПР}} + S^{j}_{{св.\\ с\\ раб.об.}}) \\cdot k_{{косв}} = ({fn(n * v, 0)} +'
+                    f' {fn(s)} ) \\cdot {fn(chapter_2_5.k_kosv)} = {fn(g)}', style=formula_style_12)
+
+    document.add_page_break()
+
+    dp('5.5 Расчет себестоимости единицы каждого вида продукции (А, Б и В)', subtitle_text)
+    dp('Расчет себестоимости единицы каждого вида продукции (А, Б, В) при запланированном объеме производства выполним в таблице 24. При оформлении калькуляции для всей '
+       'номенклатуры изделий укажем абсолютную величину (руб./шт.) и структуру затрат (%).')
+
+    dp()
+    dp('Таблица 25.5.1, калькуляция изделия А')
+    add_production_calculation_table(chapter_2_5.direct_A, chapter_2_5.S_rab_ob_A, chapter_2_4.S_kom.total * chapter_2_1.A_percent / (max(1, chapter_2_1.N_pl_A)))
+
+    dp()
+    dp('Таблица 25.5.2, калькуляция изделия Б')
+    add_production_calculation_table(chapter_2_5.direct_B, chapter_2_5.S_rab_ob_B, chapter_2_4.S_kom.total * chapter_2_1.B_percent / (max(1, chapter_2_1.N_pl_B)))
+
+    dp()
+    dp('Таблица 25.5.3, калькуляция изделия В')
+    add_production_calculation_table(chapter_2_5.direct_C, chapter_2_5.S_rab_ob_C, chapter_2_4.S_kom.total * chapter_2_1.C_percent / (max(1, chapter_2_1.N_pl_C)))
+
+    document.add_page_break()
+
+
+def gen_2_6():
+    dp('6. Планирование потребности в оборотных  средствах на второй период', title_text)
+    dp('Расчёт аналогичен пункту 5 раздела I')
+
+    dp('Таблица 26.1, норма запаса материалов для изделия А', table_name_text)
+    add_table([['Материал', 'число дней']] + [[e['name'], str(e['t_zap'])] for e in initial_data.materials_A.filter(lambda x: x['name'] != '-')])
+    dp('Таблица 26.2 норма запаса комплектующих для изделия А', table_name_text)
+    add_table([['Комплектующие', 'число дней']] + [[e['name'], str(e['t_zap'])] for e in initial_data.accessories_A.filter(lambda x: x['name'] != '-')])
+
+    dp()
+    dp('Таблица 26.3, норма запаса материалов для изделия В', table_name_text)
+    add_table([['Материал', 'число дней']] + [[e['name'], str(e['t_zap'])] for e in initial_data.materials_C.filter(lambda x: x['name'] != '-')])
+    dp('Таблица 26.4 норма запаса комплектующих для изделия В', table_name_text)
+    add_table([['Комплектующие', 'число дней']] + [[e['name'], str(e['t_zap'])] for e in initial_data.accessories_C.filter(lambda x: x['name'] != '-')])
+
+    document.add_page_break()
+
+    add_formula('K_{об.ср.\\ мат\\ и\\ комп.} = ' + f'{fn(chapter_2_6.K_ob_sr_mk)}\\ [руб.]')
+    dp(f'Рассчитанную величину оборотных средств в запасах материалов и комплектующих изделий увеличим на {fn(chapter_2_6.k_ob_sr_percent * 100, 0)}%. '
+       f'Общая сумма оборотных средств в производственных запасах составит:')
+    add_formula('K_{об.ср._{пр.зап.}} = ' + f'{fn(1 + chapter_2_6.k_ob_sr_percent)} \\cdot K_{{ об.ср.\\ мат.и\\ комп}} = {fn(chapter_2_6.K_ob_sr_pr_zap)}\\ [руб.]')
+    dp()
+
+    dp('6.2. Оборотные средства в незавершенном производстве', subtitle_text)
+
+    dp('Коэффициент считается для каждого изделия:')
+    add_formula('k_{нз\\ А} = \\frac{S_{мат\\ и\\ комп\\ А} + S_{А_{произв}}}{2 S_{А_{произв}}} = \\frac{' +
+                f'{fn(chapter_2_4.S_materials_i_comp_A)} + {fn(chapter_2_5.S_A_proizv)} }}{{ 2 \\cdot {fn(chapter_2_5.S_A_proizv)} }} = {fn(chapter_2_6.k_nz_A)}')
+    add_formula('k_{нз\\ Б} = \\frac{S_{мат\\ и\\ комп\\ Б} + S_{А_{произв}}}{2 S_{Б_{произв}}} = \\frac{' +
+                f'{fn(chapter_2_4.S_materials_i_comp_B)} + {fn(chapter_2_5.S_B_proizv)} }}{{ 2 \\cdot {fn(chapter_2_5.S_B_proizv)} }} = {fn(chapter_2_6.k_nz_B)}')
+    add_formula('k_{нз\\ В} = \\frac{S_{мат\\ и\\ комп\\ В} + S_{А_{произв}}}{2 S_{В_{произв}}} = \\frac{' +
+                f'{fn(chapter_2_4.S_materials_i_comp_C)} + {fn(chapter_2_5.S_C_proizv)} }}{{ 2 \\cdot {fn(chapter_2_5.S_C_proizv)} }} = {fn(chapter_2_6.k_nz_C)}')
+
+    dp('Производственный цикл (кален. дни) – отрезок времени между началом и окончанием производственного процесса '
+       'изготовления одного изделия, включающий время технологических операций; время подготовительно-заключительных операций; '
+       'длительность естественных процессов и вспомогательных операций; время межоперационных и междусменных перерывов; '
+       'время ожидания обработки при передаче изделий на рабочие места по партиям')
+
+    add_formula_with_description('T_ц = \\frac{\\sum^{m}_{i=1}{t_{техн\\ i}}\\gamma_ц}{C D}\\frac{T_{пл}}{Т_{пл} - B}', [
+        ['\\gamma_ц', f'соотношение между производственным циклом и суммарной технологической трудоемкостью изготовления изделия, принято за {fn(chapter_2_6.gamma_cycle, 0)}']
+    ])
+    add_formula(f'T_{{ц\\ A}} = {fn(chapter_2_6.T_cycle_A, 3)}\\ [дн.]')
+    add_formula(f'T_{{ц\\ Б}} = {fn(chapter_2_6.T_cycle_B, 3)}\\ [дн.]')
+    add_formula(f'T_{{ц\\ В}} = {fn(chapter_2_6.T_cycle_C, 3)}\\ [дн.]')
+
+    dp('Оборотные средства, находящиеся в незавершенном производстве - сумма оборотных средств для каждого изделия:')
+    add_formula('K_{об._{нез.пр.}} = ' + f'{fn(chapter_2_6.K_ob_nez_pr)}')
+
+    document.add_page_break()
+
+    dp('6.3. Оборотные средства в готовой продукции', subtitle_text)
+    dp('Время нахождения на складе:')
+    add_formula('t_{реал.} = ' + f'{chapter_2_6.t_real}\\ [дн.]')
+    dp('Оборотные средства, находящиеся в готовой продукции:')
+    add_formula('K_{об._{гот.прод.}} = \\frac{S_{А,Б,В_{произв}} N_{пл\\ А,Б,В}}{Т_{пл\\ А,Б,В}}t_{реал} = \\frac{' +
+                f'{fn(chapter_2_5.S_A_proizv)} \\cdot {fn(chapter_2_1.N_pl_A)} }}{{ {chapter_2_1.T_pl} }} \\cdot {chapter_2_6.t_real} + \\frac{{'
+                f'{fn(chapter_2_5.S_B_proizv)} \\cdot {fn(chapter_2_1.N_pl_B)} }}{{ {chapter_2_1.T_pl} }} \\cdot {chapter_2_6.t_real} + \\frac{{'
+                f'{fn(chapter_2_5.S_C_proizv)} \\cdot {fn(chapter_2_1.N_pl_C)} }}{{ {chapter_2_1.T_pl} }} \\cdot {chapter_2_6.t_real} = {fn(chapter_2_6.K_ob_got_prod)}\\ [руб.]')
+
+    dp()
+    dp('6.4. Суммарная потребность в оборотных средствах', subtitle_text)
+    dp('Оборотные средства включают в себе не только оборотные средства в производственных запасах, незавершенном производстве и готовой продукции, '
+       'а также в расходах будущих периодов, дебиторской задолженности, краткосрочных финансовых вложениях, денежных средствах и т.п. (т.е. прочие оборотные средства).')
+    dp('Для упрощения расчетов в курсовой работе зададим удельный вес стоимости производственных запасов, незавершенного производства и готовой продукции в '
+       'общей сумме оборотных средств:')
+
+    add_formula('\\gamma_{об} = ' + f'{chapter_2_6.gamma_ob}')
+    dp('Суммарные оборотные средства:')
+    add_formula('K_{об_{сум}} = \\frac{K_{об.ср._{пр.зап.}} + K_{об._{нез.пр.}} + K_{об._{гот.прод.}}}{\\gamma_{об}}')
+    add_formula('K_{об_{сум}} = \\frac{' + f'{fn(chapter_2_6.K_ob_sr_pr_zap)} + {fn(chapter_2_6.K_ob_nez_pr)} + {fn(chapter_2_6.K_ob_got_prod)} }}'
+                                           f'{{ {chapter_2_6.gamma_ob} }} = {fn(chapter_2_6.K_ob_sum)}\\ [руб.]')
+    dp('Прочие оборотные средства:')
+    add_formula('K_{об_{проч}} = (1 - \\gamma_{об}) \\cdot K_{об_{сум}} = ' + f'{fn(chapter_2_6.K_ob_extra)}\\ [руб.]')
+
+    dp('Расходы будущих периодов:')
+    add_formula('K_{об._{РБП}} = ' + f'{fn(chapter_2_6.K_ob_RBP)},\\ [руб.]')
+
+    dp('Денежные средства:')
+    add_formula(
+        'K_{об_{ДС}} = K_{об_{сум}} - (K_{об.ср._{пр.зап.}}) + K_{об._{РБП}}) = ' +
+        f'{fn(chapter_2_6.K_ob_sum)} - ({fn(chapter_2_6.K_ob_sr_pr_zap)} + {fn(chapter_2_6.K_ob_RBP)}) = {fn(chapter_2_6.K_ob_ds)}\\ [руб.]',
+        style=formula_style_12)
+
+    document.add_page_break()
+
+
+def gen_2_7():
+    dp('7. Плановый бухгалтерский баланс на начало второго периода', title_text)
+    dp('Составим прогнозный бухгалтерский баланс на начало второго периода.')
+    dp()
+    dp('Рассчитаем прибыль от реализации остатков готовой продукции:')
+    add_formula('Пр_{реал\\ ост} = (Ц_{реал} - S_{Б\\ произв}) \\cdot N_{ост\\ Б} = ' + f'{fn(chapter_2_7.TS_real_ost)} \\cdot {fn(chapter_8.N_ost, 0)} = {fn(chapter_2_7.P_real_ost)}')
+    dp('Чистая прибыль от реализации остатков:')
+    add_formula('Пр_{чист} = Пр_{реал\\ ост} - S_{налоги} = ' + f'{fn(chapter_2_7.P_real_ost)} - {fn(chapter_2_7.S_nalogi)} = {fn(chapter_2_7.P_chistaya_real_ost)}')
+
+    dp()
+    dp('Реализуем избыточное оборудование по остаточной цене:')
+    dp('Таблица 27.1, реализация избыточного оборудования', table_name_text)
+    add_table(
+        [['Оборудование', 'Излишек, шт.', 'Остаточная стоимость, руб./шт.']] +
+        [[e['name'], fn(e['extra'], 0), fn(e['cost'])] for e in chapter_2_7.to_sell.rows] +
+        [['Итого', fn(chapter_2_7.to_sell.calculate_sum(lambda x: x['extra']), 0), fn(chapter_2_7.S_sell_OS)]]
+    )
+    dp('Примем, что избыточное оборудование будет реализовано за ' + f'{fn(chapter_2_7.S_sell_OS)} руб.')
+    dp()
+    dp('Потребность в дополнительном оборудовании: ' + f'{fn(chapter_2_2.new_machines_cost)} руб.')
+    dp('Дополнительная потребность в ОС (помимо нового оборудования): ' +
+       f'{fn(chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total - chapter_2_2.new_machines_cost)} руб.')
+    dp('Суммарная дополнительная потребность в ОС: ' + f'{fn(chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total)} руб.')
+    dp()
+
+    document.add_page_break()
+    dp('Таблица 27.2, вспомогательные расчеты для составления планового бухгалтерского баланса на начало второго периода', table_name_text)
+    tbl = chapter_2_7.active_passive.to_table('Конец I периода', 'Покупка оборудования', 'Покупка ОПФ', 'Продажа готовой продукции', 'Продажа оборудования', 'Начало II периода')
+
+    for i in range(len(tbl)):
+        for j in range(len(tbl[i])):
+            t = type(tbl[i][j])
+            if t != str:
+                if t == int or t == float:
+                    tbl[i][j] = fn(tbl[i][j], 0)
+
+    split_active = []
+    split_passive = []
+    separator = len(tbl[0]) // 2
+    for i in tbl:
+        split_active.append(i[:separator])
+        split_passive.append(i[separator:])
+
+    t1 = add_table(split_active, style=table_style_10)
+    document.add_page_break()
+    dp('Продолжение таблицы 27.2', table_name_text)
+    t2 = add_table(split_passive, style=table_style_10)
+
+    for i in range(len(tbl)):
+        for j in range(separator):
+            if type(tbl[i][j]) == str and tbl[i][j].startswith(' '):
+                t1.cell(i, j).paragraphs[0].paragraph_format.left_indent = Cm(0.5)
+            if type(tbl[i][j + separator]) == str and tbl[i][j + separator].startswith(' '):
+                t2.cell(i, j).paragraphs[0].paragraph_format.left_indent = Cm(0.5)
+
+    for e in [0, 1, 6, 8, 18, 20]:
+        t1.cell(e, 0).paragraphs[0].runs[0].bold = True
+        t1.cell(e, 0).paragraphs[0].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+    for e in [0, 1, 6, 8, 10, 12, 18, 20]:
+        t2.cell(e, 0).paragraphs[0].runs[0].bold = True
+        t2.cell(e, 0).paragraphs[0].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+    document.add_page_break()
+
+
+def gen_2_8():
+    dp('8. Планирование цен изделий А, Б и В', title_text)
+    dp('Плановые цены трех изделий будем устанавливать на основе следующих методов ценообразования: параметрического, методов полных и переменных затрат.')
+    dp()
+    dp('8.1. Расчет цен параметрическим методом', subtitle_text)
+    dp('Считаем, что качество изделий оценивается двумя группами потребителей I (качество изделии А) и II (качество изделия В) по трем показателям – Х1, Х2 и Х3.')
+    dp('Увеличение показателя Х2 улучшает качество изделия в целом, увеличение показателя Х3 ухудшает.')
+    dp('Абсолютные значения Х1, Х2, Х3 и значения показателей важности по группам потребителей приведены в таблице:')
+
+    dp('Таблица 28.1, исходные данные для расчета цены параметрическим методом', table_name_text)
+    table = add_table(
+        [['Показатели качества', 'Абсолютные значения параметров', None, None, 'Важность', None], [None, 'A', 'Б', 'B', 'I', 'II']] +
+        [[e['name'], fn(e['A'], 0), fn(e['B'], 0), fn(e['C'], 0), fn(e['importance A']), fn(e['importance C'])] for e in chapter_2_8.parametric_data.rows])
+
+    table.cell(0, 0).merge(table.cell(1, 0))
+    table.cell(0, 1).merge(table.cell(0, 3))
+    table.cell(0, 4).merge(table.cell(0, 5))
+    dp()
+    dp('Цена определяется по формуле:')
+    add_formula_with_description(
+        'Ц_{А,В} = \\sum^3_{i=1}{(\\frac{X_{i\\ А,В}}{X_{i\\ Б}}) ^{type} \\cdot b_i}',
+        [
+            ['type', 'равен 1, если увеличение параметра улучшает качество изделия, -1 если ухудшает'],
+            ['b_i', 'важность i-го параметра (суммарная важность параметров для каждого изделия равна 1)']
+        ])
+    add_formula(f'Ц_А = {fn(chapter_7.P_fact)} \\cdot {fn(chapter_2_8.k_param_price_A)} = {fn(chapter_2_8.param_price_A)}\\ [руб.]')
+    add_formula(f'Ц_B = {fn(chapter_7.P_fact)} \\cdot {fn(chapter_2_8.k_param_price_C)} = {fn(chapter_2_8.param_price_C)}\\ [руб.]')
+
+    document.add_page_break()
+
+    dp('8.2 Расчет цен методом полных затрат', subtitle_text)
+    dp('Расчет осуществляется для трех изделий, на основе формулы п. 7.1')
+    dp('Планируемую прибыль от продаж определим на основе рентабельности продукции за первый период:')
+    add_formula_with_description(
+        'П_{продаж} = S_{сум\\ 2\\ пер} R_{прод\\ факт} = ' +
+        f' {fn(chapter_2_4.S_sum.total)} \\cdot {fn(chapter_10.R_production_fact)} = {fn(chapter_2_8.P_prodaj)}\\ [руб.]',
+        [['R_{прод\\ факт}', 'фактическая рентабельность продукции в первом периоде']])
+
+    dp()
+    dp(f'Коэффициент наценки одинаковый для всей продукции ({fn(chapter_2_8.k_nats)}):')
+    for n, p, pr in [
+        ['A', chapter_2_5.S_A_proizv, chapter_2_8.total_cost_price_A],
+        ['Б', chapter_2_5.S_B_proizv, chapter_2_8.total_cost_price_B],
+        ['В', chapter_2_5.S_C_proizv, chapter_2_8.total_cost_price_C]
+    ]:
+        add_formula(f'Ц_{{ {n}\\ пост\\ затр}} = {fn(p + chapter_2_4.S_kom.total / initial_data.N_pl)} \\cdot (1 + {fn(chapter_2_8.k_nats)}) = {fn(pr)}')
+    dp()
+    dp('Выводы:')
+
+    document.add_page_break()
+
+    dp('8.3 Расчет цен методом переменных затрат', subtitle_text)
+
+    dp('Таблица 28.3.1, условно-постоянные и переменные затраты для изделия А', table_name_text)
+    add_const_and_variable_costs_table(chapter_2_8.S_A_sum, chapter_2_8.S_A_sum['fot'], chapter_2_8.S_A_sum['fot fee'], style=table_style_12_dense)
+
+    dp('Таблица 28.3.2, условно-постоянные и переменные затраты для изделия Б', table_name_text)
+    add_const_and_variable_costs_table(chapter_2_8.S_B_sum, chapter_2_8.S_B_sum['fot'], chapter_2_8.S_B_sum['fot fee'], style=table_style_12_dense)
+
+    dp('Таблица 28.3.3, условно-постоянные и переменные затраты для изделия В', table_name_text)
+    add_const_and_variable_costs_table(chapter_2_8.S_C_sum, chapter_2_8.S_C_sum['fot'], chapter_2_8.S_C_sum['fot fee'], style=table_style_12_dense)
+
+    dp()
+    dp('Расчет осуществим для трех изделий, на основе формулы п. 7.2')
+    dp(f'Коэффициент наценки одинаковый: {fn(chapter_2_8.k_nats_variable)}')
+    for n, p, pr in [
+        ['A', chapter_2_8.S_A_poln.variable, chapter_2_8.variable_cost_price_A],
+        ['Б', chapter_2_8.S_B_poln.variable, chapter_2_8.variable_cost_price_B],
+        ['В', chapter_2_8.S_C_poln.variable, chapter_2_8.variable_cost_price_C]
+    ]:
+        add_formula(f'Ц_{{ {n}\\ перем\\ затр}} = {fn(p)} \\cdot (1 + {fn(chapter_2_8.k_nats_variable)}) = {fn(pr)}')
+
+    document.add_page_break()
+
+    dp('8.4. Установленные цены изделий А, Б и В', subtitle_text)
+    dp('Полученные результаты в пунктах 8.1, 8.2 и 8.3 отразим в таблице:')
+    dp('Таблица 28.4.1, итоговые результаты ценообразования, полученные разными методами', table_name_text)
+    table = add_table([
+        ['Наименование изделия', 'Полная себестоимость, руб./шт', 'Цена, полученная методом полных затрат, руб./шт.', 'Цена, полученная методом, переменных затрат, руб./шт.',
+         'Цена, полученная «ценностным» методом, руб./шт.', 'Установленная цена, руб./шт.'],
+        ['A', fn(chapter_2_8.S_A_poln.total), fn(chapter_2_8.total_cost_price_A), fn(chapter_2_8.variable_cost_price_A), fn(chapter_2_8.param_price_A), fn(chapter_2_8.TS_A_plan)],
+        ['Б', fn(chapter_2_8.S_B_poln.total), fn(chapter_2_8.total_cost_price_B), fn(chapter_2_8.variable_cost_price_B), fn(chapter_2_8.param_price_B), fn(chapter_2_8.TS_B_plan)],
+        ['В', fn(chapter_2_8.S_C_poln.total), fn(chapter_2_8.total_cost_price_C), fn(chapter_2_8.variable_cost_price_C), fn(chapter_2_8.param_price_C), fn(chapter_2_8.TS_C_plan)],
+    ], [Cm(1.5), Cm(3.2), Cm(3), Cm(3), Cm(3.2), Cm(3)], style=table_style_12)
+
+    textDirection = OxmlElement('w:textDirection')
+    textDirection.set(ns.qn('w:val'), 'btLr')  # btLr tbRl
+    table.cell(0, 0)._tc.get_or_add_tcPr().append(textDirection)
+
+    dp('В качестве установленной цены примем максимальную из полученных')
+
+
+def gen_2_9():
+    dp('9. Отчет о финансовых результатах на конец второго периода', title_text)
+
+    dp('Рассчитаем планируемую выручку от реализации:')
+    add_formula('Q_{реал.\\ план} = \\sum_{i={{A,Б,В}} }{Ц_i \\cdot N_{пл\\ i}} = ' + f'{fn(chapter_2_9.Q_plan)}\\ [руб.]')
+
+    add_formula(
+        'S_{пр.гот.пр_{план}} = S_{пр.тек_{пл.}} - K_{об_{нез.пр.}} - K_{об._{гот.прод.}} = ' +
+        f'{fn(chapter_2_4.S_pr_tek_pl)} - {fn(chapter_2_6.K_ob_nez_pr)} - {fn(chapter_2_6.K_ob_got_prod)} = {fn(chapter_2_9.S_pr_got_pr_plan)}', style=formula_style_12)
+
+    dp('Прочие доходы и расходы примерно равны прочим доходам и расходам за прошлый период.')
+
+    dp('Таблица 8, отчёт о финансовых результатах на конец первого периода', table_name_text)
+    table = add_table([
+        ['Наименование показателя', 'Сумма, руб/год'],
+        [None, 'план'],
+        ['Выручка', fn(chapter_2_9.Q_plan)],
+        ['Себестоимость продаж (проданной готовой продукции)', fn(chapter_2_9.S_pr_got_pr_plan)],
+        ['Валовая прибыль (убыток)', fn(chapter_2_9.S_valovaya_plan)],
+        ['Коммерческие расходы', fn(chapter_2_9.S_kom_plan)],
+        ['Прибыль (убыток) от продаж', fn(chapter_2_9.P_pr_plan)],
+        ['Прочие доходы ', fn(0), fn(0)],
+        ['Прочие расходы', fn(chapter_2_9.S_prochie_dohidy_i_rashody_plan)],
+        ['Прибыль (убыток) до налогообложения', fn(chapter_2_9.P_pr_do_nalogov_plan)],
+        ['Налог на прибыль', fn(chapter_2_9.nalog_na_pribil_plan)],
+        ['Чистая прибыль (убыток)', fn(chapter_2_9.P_chistaya_plan)],
+    ], [Cm(9), Cm(8)])
+    table.cell(0, 0).merge(table.cell(1, 0))
+
+
+def gen_2_10():
+    dp('10. Плановый бухгалтерский баланс на конец второго периода', title_text)
+
+    dp(f'Амортизация основных средств: {fn(chapter_2_4.costs["amortisation OS"].total)} [руб./год] (см п.3)')
+    dp(f'Амортизация НМА: {fn(chapter_2_4.costs["amortisation NMA"].total)} [руб./год] (см п.3)')
+    dp('Рассчитаем оборотные средства в незавершённом производстве и готовой продукции:')
+    add_formula('K_{об_{нез.пр.\\ план}} = ' + f'{fn(chapter_2_6.K_ob_nez_pr)}\\ [руб.]\\ (см.\\ п.\\ 5.2)')
+    add_formula('K_{об_{гот.пр.\\ план}} = ' + f'{fn(chapter_2_6.K_ob_got_prod)}\\ [руб.]\\ (см.\\ п.\\ 5.2)')
+
+    dp()
+    dp('Рассчитаем денежные средства:')
+    add_formula('K_{ден.ср.\\ план} = K_{ден.ср.нач.период.} - A_{НМА} - А_{ОС} + П_{чист.\\ план} - (K_{об_{нез.пр.\\ план}} + K_{об_{гот.пр.\\ план}}) = ' +
+                f'{fn(chapter_2_7.active_passive["begin II"].active.K_ob_ds)} - {fn(chapter_2_4.costs["amortisation NMA"].total)} - {fn(chapter_2_4.costs["amortisation OS"].total)} + '
+                f'{fn(chapter_2_9.P_chistaya_plan)} - ({fn(chapter_2_6.K_ob_nez_pr)} + {fn(chapter_2_9.K_ob_got_prod_plan)}) = {fn(chapter_2_10.K_den_sr_plan)}', style=formula_style_12)
+
+    dp()
+    if chapter_2_10.valid_to_cope_kz_plan == 'full':
+        dp('Возможно полное погашение краткосрочных заёмных средств для плановой суммы денежных средств:')
+        add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' +
+                    f'{fn(chapter_2_10.K_den_sr_plan)} - {fn(chapter_2_7.active_passive["begin II"].passive.kratkosroch_zaem_sredstva)} = {fn(chapter_2_10.K_den_sr_konez_plan)}\\ [руб.]',
+                    style=formula_style_12)
+    elif chapter_2_10.valid_to_cope_kz_plan == 'part':
+        dp('Возможно частичное погашение краткосрочных заёмных средств для плановой суммы '
+           'денежных средств (дальнейшая генерация неверна):').runs[0].font.color.rgb = RGBColor(255, 0, 0)
+        add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' + f'{fn(500_000)} \\ [руб.]')
+        add_formula('S_{кр.заёмн.ср.\\ план} = ' + f'{fn(chapter_2_10.S_kratkosroch_zaem_sredstva_konez_plan)} \\ [руб.]')
+    else:
+        dp('Погашение краткосрочных заёмных средств невозможно для плановой суммы денежных средств, '
+           'дальнейшая генерация неверна.').runs[0].font.color.rgb = RGBColor(255, 0, 0)
+
+    document.add_page_break()
+
+    dp('Таблица 210.1, плановый бухгалтерский баланс на конец периода', table_name_text)
+    add_active_passive_table(chapter_2_10.active_passive_plan)
+
+    document.add_page_break()
+
+
+def gen_2_11():
+    dp('11. Основные показатели хозяйственной деятельности предприятия на конец второго периода', title_text)
+    dp('Рассчитаем основные показатели хозяйственной деятельности. Построим графики рентабельности для изделий А, Б и В, '
+       'определим точку безубыточности, запас финансовой прочности, величину операционного рычага.')
+
+    def gen_2_11_1():
+        dp()
+        dp('11.1 Основные показатели хозяйственной деятельности предприятия', subtitle_text)
+
+        dp()
+        dp('Сумма хозяйственных средств:')
+        add_formula('K_{хс.\\ план} = ' + f'{fn(chapter_2_10.active_passive_plan.active)}\\ [руб.]', style=formula_style_12)
+
+        dp()
+        dp('Собственные оборотные средства:')
+        add_formula('k_{соб.об.ср.} = Оборотные\\ активы - Краткосрочные\\ обязательства')
+        add_formula('k_{соб.об.ср.\\ план} = ' +
+                    f'{fn(chapter_2_10.active_passive_plan.r2)} - {fn(chapter_2_10.active_passive_plan.r5)} = {fn(chapter_2_11.k_sob_ob_sr_plan)}\\ [руб.]', style=formula_style_12)
+
+        dp()
+        dp('Коэффициент обеспеченности собственными средствами:')
+        add_formula('k_{обеспеч.соб.ср.} = \\frac{Оборотные\\ активы - Краткосрочные\\ обязательства}{Оборотные\\ активы}')
+        add_formula(
+            'k_{обеспеч.соб.ср.\\ план} = \\frac{' +
+            f'{fn(chapter_2_11.k_sob_ob_sr_plan)} }}{{ {fn(chapter_2_10.active_passive_plan.r2)} }} = {fn(chapter_2_11.k_obespech_sob_sr_plan)}', style=formula_style_12)
+
+        dp('Коэффициент абсолютной ликвидности:')
+        add_formula('k_{абс.ликв.} = \\frac{Абсолютно\\ ликвидныке\\ активы}{Краткосрочные\\ обязательства}')
+        add_formula('k_{абс.ликв.\\ план} = \\frac{' +
+                    f'{fn(chapter_2_10.active_passive_plan.K_ob_ds)} }}{{ {fn(chapter_2_10.active_passive_plan.r5)} }} = {fn(chapter_2_11.k_abs_likvid_plan)}', style=formula_style_12)
+
+        dp()
+        dp('Коэффициент текущей ликвидности (или коэффициент покрытия баланса):')
+        add_formula('k_{тек.ликв.} = \\frac{Сумма\\ оборотных\\ активов}{Краткосрочные\\ обязательства}')
+        add_formula('k_{тек.ликв.\\ план} = \\frac{' +
+                    f'{fn(chapter_2_10.active_passive_plan.r2)} }}{{ {fn(chapter_2_10.active_passive_plan.r5)} }} = {fn(chapter_2_11.k_tek_likvid_plan)}', style=formula_style_12)
+
+        document.add_page_break()
+
+        dp('Выручка от продажи продукции:')
+        add_formula('Q_{план} = ' + f'{fn(chapter_2_9.Q_plan)}\\ [руб.]', style=formula_style_12)
+
+        dp()
+        dp('Нераспределенная прибыль:')
+        add_formula('П_{нерасп.\\ план} = ' + f'{fn(chapter_2_10.active_passive_plan.neraspred_pribil)}\\ [руб.]', style=formula_style_12)
+
+        dp('Выработка продукции на одного работника:')
+        add_formula('V = \\frac{Объём\\ продукции}{Среднесписочное\\ кол-во\\ ППП} = \\frac{' +
+                    f'{fn(initial_data.N_pl, 0)} }}{{ {fn(chapter_2_3.R_ppp, 0)} }} = {fn(chapter_2_11.V)}\\ [шт./работн.год]', style=formula_style_12)
+
+        dp()
+        dp('Среднегодовая стоимость ОПФ:')
+        add_formula(
+            'S_{ср.год.ст.ОПФ} = S_{ОПФ\\ нач.пер.} - А_{ОПФ} \\cdot 0.5 = ' +
+            f'{fn(chapter_2_2.S_os_amortisable)} - {fn(chapter_2_4.costs["amortisation OS"].total)} = {fn(chapter_2_11.OS_year_mean)}\\ [руб.]', style=formula_style_12)
+
+        dp()
+        dp('Коэффициент фондоотдачи:')
+        add_formula('k_{ФО\\ план} = \\frac{Q_{план}}{Среднегодовая\\ стоимость\\ ОПФ} = \\frac{' +
+                    f'{fn(chapter_2_9.Q_plan)} }}{{ {fn(chapter_2_11.OS_year_mean)} }} = {fn(chapter_2_11.k_FO_plan)}', style=formula_style_12)
+
+        dp()
+        dp('Коэффициент фондоемкости:')
+        add_formula('k_{ФЕ\\ план} = k_{ФО\\ план}^{-1} = ' + f'{fn(chapter_2_11.k_FO_plan)} ^ {{-1}} = {fn(chapter_2_11.k_FE_plan)}', style=formula_style_12)
+
+        dp()
+        dp('Число оборотов оборотных средств:')
+        add_formula('Ср.сумм.исп.об.ср._{план} = ' + f'{fn(chapter_2_11.Z_ob_sr_year_mean_plan)}\\ [руб.]', style=formula_style_12)
+        add_formula('Z_{об} = \\frac{Выручка\\ от\\ реализации}{Средняя\\ сумма\\ используемых\\ обороных\\ средств}')
+        add_formula('Z_{об\\ план} = \\frac{' +
+                    f'{fn(chapter_2_9.Q_plan)} }}{{ {fn(chapter_2_11.Z_ob_sr_year_mean_plan)} }} = {fn(chapter_2_11.Z_ob_sr_year_mean_plan)} [раз/год]', style=formula_style_12)
+
+        dp('Оборачиваемость собственного капитала:')
+        add_formula('Ср.год.собств.кап_{план} = ' + f'{fn(chapter_2_11.S_sobstv_cap_year_mean_plan)}\\ [руб.]', style=formula_style_12)
+        add_formula('k_{об.собств.кап.} = \\frac{Выручка\\ от\\ реализации}{Ср.год.собств.кап}')
+        add_formula('k_{об.собств.кап.\\ план} = \\frac{' +
+                    f'{fn(chapter_8.Q_plan)} }}{{ {fn(chapter_2_11.S_sobstv_cap_year_mean_plan)} }} = {fn(chapter_2_11.k_oborach_sobstv_capital_plan)}', style=formula_style_12)
+
+        document.add_page_break()
+
+        dp('Рентабельность продукции:')
+        add_formula('R_{продукции} = \\frac{Прибыль\\ от\\ продаж}{Себестоимость\\ продаж}')
+        add_formula('R_{продукции\\ план} = \\frac{' +
+                    f'{fn(chapter_2_9.P_pr_plan)} }}{{ {fn(chapter_2_4.S_sum.total)} }} = {fn(chapter_2_11.R_production_plan)}', style=formula_style_12)
+
+        dp()
+        dp('Рентабельность продаж:')
+        add_formula('R_{продаж} = \\frac{Чистая\\ прибыль}{Выручка}')
+        add_formula('R_{продаж\\ план} = \\frac{' +
+                    f'{fn(chapter_2_9.P_chistaya_plan)} }}{{ {fn(chapter_2_9.Q_plan)} }} = {fn(chapter_2_11.R_sell_plan)}', style=formula_style_12)
+
+        dp('Рентабельность активов:')
+        add_formula('R_{активов} = \\frac{Чистая\\ прибыль}{Актив}')
+        add_formula('R_{активов\\ план} = \\frac{' +
+                    f'{fn(chapter_2_9.P_chistaya_plan)} }}{{ {fn(chapter_2_10.active_passive_plan.active)} }} = {fn(chapter_2_11.R_active_plan)}', style=formula_style_12)
+
+        dp()
+        dp('Рентабельность собственного капитала:')
+        add_formula('R_{собств.кап.} = \\frac{Чистая\\ прибыль}{Актив}')
+        add_formula('R_{собств.кап.\\ план} = \\frac{' +
+                    f'{fn(chapter_2_9.P_chistaya_plan)} }}{{ {fn(chapter_2_11.S_sobstv_cap_year_mean_plan)} }} = {fn(chapter_2_11.R_sobstv_capital_plan)}', style=formula_style_12)
+
+        document.add_page_break()
+
+        dp('Таблица 211.1, плановые значения основных показателей хозяйственной деятельности предприятия во II периоде', table_name_text)
+        add_table([
+            ['Наименование показателя и его размерность', 'План'],
+            ['Сумма хозяйственных средств, [руб.]', fn(chapter_2_10.active_passive_plan.active)],
+            ['Собственные оборотные средства, [руб.]', fn(chapter_2_11.k_sob_ob_sr_plan)],
+            ['Коэффициент обеспеченности собственными средствами', fn(chapter_2_11.k_obespech_sob_sr_plan)],
+            ['Коэффициент абсолютной ликвидности', fn(chapter_2_11.k_abs_likvid_plan)],
+            ['Коэффициент текущей ликвидности', fn(chapter_2_11.k_tek_likvid_plan)],
+            ['Выручка от продажи продукции, [руб.]', fn(chapter_2_9.Q_plan)],
+            ['Нераспределенная прибыль, [руб.]', fn(chapter_2_10.active_passive_plan.neraspred_pribil)],
+            ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_2_11.V)],
+            ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_2_11.OS_year_mean)],
+            ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_2_11.k_FO_plan), ],
+            ['Коэффициент фондоемкости [руб.]', fn(chapter_2_11.k_FE_plan)],
+            ['Число оборотов оборотных средств, [раз/год]', fn(chapter_2_11.Z_ob_sr_year_mean_plan)],
+            ['Оборачиваемость собственного капитала', fn(chapter_2_11.k_oborach_sobstv_capital_plan)],
+            ['Рентабельность продукции', fn(chapter_2_11.R_production_plan)],
+            ['Рентабельность продаж', fn(chapter_2_11.R_sell_plan)],
+            ['Рентабельность активов [1/год]', fn(chapter_2_11.R_active_plan)],
+            ['Рентабельность собственного капитала [1/год]', fn(chapter_2_11.R_sobstv_capital_plan)],
+        ], [Cm(9.25), Cm(7.5)], True, style=table_style_12)
+
+        document.add_page_break()
+
+    def gen_2_11_2():
+        dp('11.2 Графики рентабельности изделий', subtitle_text)
+        dp('В данном случае примем что мы не изменяем численность ОПР, необходимую для производства N изделий, а следовательно их премии и стимулирующие выплаты '
+           'останутся неизменными, и мы сможем воспользоваться предложенными формулами.')
+        dp('Точка безубыточности:')
+        add_formula('N_{кр} = \\frac{S_{усл.пост.}}{Ц_{произв\\ план} - S_{перем}}')
+        dp('Коэффициент покрытия:')
+        add_formula('k_{покр} = \\frac{Ц_{произв\\ план} - S_{перем}}{Ц_{произв\\ план}')
+
+        document.add_page_break()
+
+        def gen_2_11_2_A():
+            dp('11.2.1 для изделия А', subtitle_2_text)
+            dp('Точка безубыточности:')
+            add_formula('N_{кр\\ A} = \\frac{' + f'{fn(chapter_2_8.S_A_sum.const)} }}{{ {fn(chapter_2_8.TS_A_plan)} - {fn(chapter_2_8.S_A_poln.variable)} }} = {fn(chapter_2_11.N_kr_A, 0)}')
+            add_formula('Q_{кр\\ A} = N_{кр\\ A} \\cdot Ц_{A\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_A)}')
+            dp('Коэффициент покрытия:')
+            add_formula('k_{покр\\ A} = \\frac{' + f'{fn(chapter_2_8.TS_A_plan)} - {fn(chapter_2_8.S_A_poln.variable)} }}{{ {fn(chapter_2_8.TS_A_plan)} }} = {fn(chapter_2_11.k_pokr_A)}')
+            dp('Запас финансовой прочности:')
+            add_formula('Q_{фин\\ пр.\\ A} = \\frac{' + f'{fn(chapter_2_9.Q_plan_A)} - {fn(chapter_2_11.Q_kr_A)} }}{{ {fn(chapter_2_9.Q_plan_A)} }} = {fn(chapter_2_11.Q_fin_pr_A * 100)}%')
+
+            dp('Эффект производственного рычага:')
+            add_formula('E_{пр.\\ рыч.\\ план\\ А} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_A)} - {fn(chapter_2_8.S_A_sum.variable)} }}{{ {fn(chapter_2_9.P_pr_plan)} }} = {fn(chapter_2_11.proizv_richag_A)}')
+
+            dp('График 211.2.1, рентабельность изделия А', table_name_text)
+
+            plt.figure(figsize=(8, 8))
+            plt.subplot(1, 1, 1)
+
+            plt.title('S(N)')
+            plt.xlabel('N, шт. / год')
+            plt.ylabel('Выручка, затраты, тыс. руб./год')
+            plt.xticks([0, chapter_2_11.N_kr_A, chapter_2_1.N_pl_A], ['0', 'N кр\n{:,.0f}'.format(chapter_2_11.N_kr_A), 'N пл\n{:,.0f}'.format(chapter_2_1.N_pl_A)], rotation=0)
+            plt.yticks([0, chapter_2_8.S_A_sum.const / 1e3, chapter_2_11.Q_kr_A / 1e3, chapter_2_8.S_A_sum.total / 1e3, chapter_2_9.Q_plan_A / 1e3],
+                       ['0', 'S усл.пост.\n{:,.0f}'.format(chapter_2_8.S_A_sum.total / 1e3), 'Q кр.\n{:,.0f}'.format(chapter_10.Q_kr / 1e3),
+                        '{:,.0f}\nS сум.'.format(chapter_2_8.S_A_sum.total / 1e3), 'Q пл\n{:,.0f}'.format(chapter_2_9.Q_plan_A / 1e3)])
+            plt.grid(True)
+            plt.plot([0, chapter_2_1.N_pl_A], np.array([chapter_2_8.S_A_sum.const, chapter_2_8.S_A_sum.const]) / 1e3, label='S усл-пост.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_A], np.array([0, chapter_2_8.S_A_sum.variable]) / 1e3, label='S перем.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_A], np.array([chapter_2_8.S_A_sum.const, chapter_2_8.S_A_sum.total]) / 1e3, label='S тек.сум.')
+            plt.plot([0, chapter_2_1.N_pl_A], [0, chapter_2_9.Q_plan_A / 1e3], label='Q пл.')
+            plt.legend()
+            plt.tight_layout()
+
+            memfile = BytesIO()
+            plt.savefig(memfile)
+
+            picP = document.add_paragraph()
+            picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_break(WD_BREAK.PAGE)
+
+        def gen_2_11_2_B():
+            dp('11.2.1 для изделия Б', subtitle_2_text)
+            dp('Точка безубыточности:')
+            add_formula('N_{кр\\ Б} = \\frac{' + f'{fn(chapter_2_8.S_B_sum.const)} }}{{ {fn(chapter_2_8.TS_B_plan)} - {fn(chapter_2_8.S_B_poln.variable)} }} = {fn(chapter_2_11.N_kr_B, 0)}')
+            add_formula('Q_{кр\\ Б} = N_{кр\\ Б} \\cdot Ц_{Б\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_B)}')
+            dp('Коэффициент покрытия:')
+            add_formula('k_{покр\\ Б} = \\frac{' + f'{fn(chapter_2_8.TS_B_plan)} - {fn(chapter_2_8.S_B_poln.variable)} }}{{ {fn(chapter_2_8.TS_B_plan)} }} = {fn(chapter_2_11.k_pokr_B)}')
+            dp('Запас финансовой прочности:')
+            add_formula('Q_{фин\\ пр.\\ Б} = \\frac{' + f'{fn(chapter_2_9.Q_plan_B)} - {fn(chapter_2_11.Q_kr_B)} }}{{ {fn(chapter_2_9.Q_plan_B)} }} = {fn(chapter_2_11.Q_fin_pr_B * 100)}%')
+
+            dp('Эффект производственного рычага:')
+            add_formula('E_{пр.\\ рыч.\\ план\\ Б} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_B)} - {fn(chapter_2_8.S_B_sum.variable)} }}{{ {fn(chapter_2_9.P_pr_plan)} }} = {fn(chapter_2_11.proizv_richag_B)}')
+
+            dp('График 211.2.2, рентабельность изделия Б', table_name_text)
+
+            plt.figure(figsize=(8, 8))
+            plt.subplot(1, 1, 1)
+
+            plt.title('S(N)')
+            plt.xlabel('N, шт. / год')
+            plt.ylabel('Выручка, затраты, тыс. руб./год')
+            plt.xticks([0, chapter_2_11.N_kr_B, chapter_2_1.N_pl_B], ['0', 'N кр\n{:,.0f}'.format(chapter_2_11.N_kr_B), 'N пл\n{:,.0f}'.format(chapter_2_1.N_pl_B)], rotation=0)
+            plt.yticks([0, chapter_2_8.S_B_sum.const / 1e3, chapter_2_11.Q_kr_B / 1e3, chapter_2_8.S_B_sum.total / 1e3, chapter_2_9.Q_plan_B / 1e3],
+                       ['0', 'S усл.пост.\n{:,.0f}'.format(chapter_2_8.S_B_sum.total / 1e3), 'Q кр.\n{:,.0f}'.format(chapter_10.Q_kr / 1e3),
+                        '{:,.0f}\nS сум.'.format(chapter_2_8.S_B_sum.total / 1e3), 'Q пл\n{:,.0f}'.format(chapter_2_9.Q_plan_B / 1e3)])
+            plt.grid(True)
+            plt.plot([0, chapter_2_1.N_pl_B], np.array([chapter_2_8.S_B_sum.const, chapter_2_8.S_B_sum.const]) / 1e3, label='S усл-пост.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_B], np.array([0, chapter_2_8.S_B_sum.variable]) / 1e3, label='S перем.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_B], np.array([chapter_2_8.S_B_sum.const, chapter_2_8.S_B_sum.total]) / 1e3, label='S тек.сум.')
+            plt.plot([0, chapter_2_1.N_pl_B], [0, chapter_2_9.Q_plan_B / 1e3], label='Q пл.')
+            plt.legend()
+            plt.tight_layout()
+
+            memfile = BytesIO()
+            plt.savefig(memfile)
+
+            picP = document.add_paragraph()
+            picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_break(WD_BREAK.PAGE)
+
+        def gen_2_11_2_C():
+            dp('11.2.1 для изделия В', subtitle_2_text)
+            dp('Точка безубыточности:')
+            add_formula('N_{кр\\ В} = \\frac{' + f'{fn(chapter_2_8.S_C_sum.const)} }}{{ {fn(chapter_2_8.TS_C_plan)} - {fn(chapter_2_8.S_C_poln.variable)} }} = {fn(chapter_2_11.N_kr_C, 0)}')
+            add_formula('Q_{кр\\ В} = N_{кр\\ В} \\cdot Ц_{В\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_C)}')
+            dp('Коэффициент покрытия:')
+            add_formula('k_{покр\\ В} = \\frac{' + f'{fn(chapter_2_8.TS_C_plan)} - {fn(chapter_2_8.S_C_poln.variable)} }}{{ {fn(chapter_2_8.TS_C_plan)} }} = {fn(chapter_2_11.k_pokr_C)}')
+            dp('Запас финансовой прочности:')
+            add_formula('Q_{фин\\ пр.\\ В} = \\frac{' + f'{fn(chapter_2_9.Q_plan_C)} - {fn(chapter_2_11.Q_kr_C)} }}{{ {fn(chapter_2_9.Q_plan_C)} }} = {fn(chapter_2_11.Q_fin_pr_C * 100)}%')
+
+            dp('Эффект производственного рычага:')
+            add_formula('E_{пр.\\ рыч.\\ план\\ В} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_C)} - {fn(chapter_2_8.S_C_sum.variable)} }}{{ {fn(chapter_2_9.P_pr_plan)} }} = {fn(chapter_2_11.proizv_richag_C)}')
+
+            dp('График 211.2.3, рентабельность изделия В', table_name_text)
+
+            plt.figure(figsize=(8, 8))
+            plt.subplot(1, 1, 1)
+
+            plt.title('S(N)')
+            plt.xlabel('N, шт. / год')
+            plt.ylabel('Выручка, затраты, тыс. руб./год')
+            plt.xticks([0, chapter_2_11.N_kr_C, chapter_2_1.N_pl_C], ['0', 'N кр\n{:,.0f}'.format(chapter_2_11.N_kr_C), 'N пл\n{:,.0f}'.format(chapter_2_1.N_pl_C)], rotation=0)
+            plt.yticks([0, chapter_2_8.S_C_sum.const / 1e3, chapter_2_11.Q_kr_C / 1e3, chapter_2_8.S_C_sum.total / 1e3, chapter_2_9.Q_plan_C / 1e3],
+                       ['0', 'S усл.пост.\n{:,.0f}'.format(chapter_2_8.S_C_sum.total / 1e3), 'Q кр.\n{:,.0f}'.format(chapter_10.Q_kr / 1e3),
+                        '{:,.0f}\nS сум.'.format(chapter_2_8.S_C_sum.total / 1e3), 'Q пл\n{:,.0f}'.format(chapter_2_9.Q_plan_C / 1e3)])
+            plt.grid(True)
+            plt.plot([0, chapter_2_1.N_pl_C], np.array([chapter_2_8.S_C_sum.const, chapter_2_8.S_C_sum.const]) / 1e3, label='S усл-пост.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_C], np.array([0, chapter_2_8.S_C_sum.variable]) / 1e3, label='S перем.', ls=':')
+            plt.plot([0, chapter_2_1.N_pl_C], np.array([chapter_2_8.S_C_sum.const, chapter_2_8.S_C_sum.total]) / 1e3, label='S тек.сум.')
+            plt.plot([0, chapter_2_1.N_pl_C], [0, chapter_2_9.Q_plan_C / 1e3], label='Q пл.')
+            plt.legend()
+            plt.tight_layout()
+
+            memfile = BytesIO()
+            plt.savefig(memfile)
+
+            picP = document.add_paragraph()
+            picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_break(WD_BREAK.PAGE)
+
+        gen_2_11_2_A()
+        gen_2_11_2_B()
+        gen_2_11_2_C()
+
+    gen_2_11_1()
+    gen_2_11_2()
+
+    dp('Таблица 211.3, плановые и фактические значения основных показателей хозяйственной деятельности предприятия за I и II период', table_name_text)
+    table = add_table([
+        ['Наименование показателя и его размерность', 'Значение', None, None],
+        [None, 'I период', None, 'II период'],
+        [None, 'план', 'факт', 'план'],
+        ['Сумма хозяйственных средств, [руб.]', fn(chapter_9.active_passive_plan.active), fn(chapter_9.active_passive_fact.active), fn(chapter_2_10.active_passive_plan.active)],
+        ['Собственные оборотные средства, [руб.]', fn(chapter_10.k_sob_ob_sr_plan), fn(chapter_10.k_sob_ob_sr_fact), fn(chapter_2_11.k_sob_ob_sr_plan)],
+        ['Коэффициент обеспеченности собственными средствами', fn(chapter_10.k_obespech_sob_sr_plan), fn(chapter_10.k_obespech_sob_sr_fact), fn(chapter_2_11.k_obespech_sob_sr_plan)],
+        ['Коэффициент абсолютной ликвидности', fn(chapter_10.k_abs_likvid_plan), fn(chapter_10.k_abs_likvid_fact), fn(chapter_2_11.k_abs_likvid_plan)],
+        ['Коэффициент текущей ликвидности', fn(chapter_10.k_tek_likvid_plan), fn(chapter_10.k_tek_likvid_fact), fn(chapter_2_11.k_tek_likvid_plan)],
+        ['Выручка от продажи продукции, [руб.]', fn(chapter_8.Q_plan), fn(chapter_8.Q_fact), fn(chapter_2_9.Q_plan)],
+        ['Нераспределенная прибыль, [руб.]', fn(chapter_9.active_passive_plan.neraspred_pribil), fn(chapter_9.active_passive_fact.neraspred_pribil), fn(chapter_2_10.active_passive_plan.neraspred_pribil)],
+        ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_10.V), fn(chapter_10.V), fn(chapter_2_11.V)],
+        ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_10.OS_year_mean), fn(chapter_10.OS_year_mean), fn(chapter_2_11.OS_year_mean)],
+        ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_10.k_FO_plan), fn(chapter_10.k_FO_fact), fn(chapter_2_11.k_FO_plan), ],
+        ['Коэффициент фондоемкости [руб.]', fn(chapter_10.k_FE_plan), fn(chapter_10.k_FE_fact), fn(chapter_2_11.k_FE_plan)],
+        ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_sr_year_mean_plan), fn(chapter_10.Z_ob_sr_year_mean_fact), fn(chapter_2_11.Z_ob_sr_year_mean_plan)],
+        ['Оборачиваемость собственного капитала', fn(chapter_10.k_oborach_sobstv_capital_plan), fn(chapter_10.k_oborach_sobstv_capital_fact), fn(chapter_2_11.k_oborach_sobstv_capital_plan)],
+        ['Рентабельность продукции', fn(chapter_10.R_production_plan), fn(chapter_10.R_production_fact), fn(chapter_2_11.R_production_plan)],
+        ['Рентабельность продаж', fn(chapter_10.R_sell_plan), fn(chapter_10.R_sell_fact), fn(chapter_2_11.R_sell_plan)],
+        ['Рентабельность активов [1/год]', fn(chapter_10.R_active_plan), fn(chapter_10.R_active_fact), fn(chapter_2_11.R_active_plan)],
+        ['Рентабельность собственного капитала [1/год]', fn(chapter_10.R_sobstv_capital_plan), fn(chapter_10.R_sobstv_capital_fact), fn(chapter_2_11.R_sobstv_capital_plan)],
+    ], [Cm(7.5), Cm(3.3), Cm(3.3), Cm(3.3)], True, style=table_style_12)
+    table.cell(0, 0).merge(table.cell(2, 0))
+    table.cell(0, 1).merge(table.cell(0, 3))
+    table.cell(1, 1).merge(table.cell(1, 2))
+
+    document.add_page_break()
+
+
+def gen_final():
+    dp('Заключение', title_text)
 
 
 def main():
@@ -2301,13 +4028,15 @@ def main():
     gen_2_1()
     gen_2_2()
     gen_2_3()
-    # gen_2_4()
-    # gen_2_5()
-    # gen_2_6()
-    # gen_2_7() # today
-    # gen_2_8()
-    # gen_2_9()
-    # gen_2_10()
+    gen_2_4()
+    gen_2_5()
+    gen_2_6()
+    gen_2_7()
+    gen_2_8()
+    gen_2_9()
+    gen_2_10()
+    gen_2_11()
+    gen_final()
 
     return p
 
@@ -2379,9 +4108,10 @@ if __name__ == '__main__':
     t = time.time()
     paragraph = main()
 
-    document.sections[1].footer.is_linked_to_previous = False
-    add_page_numbers(document.sections[1].footer.paragraphs[0])
-    add_table_of_content(paragraph)
+    if paragraph is not None:
+        document.sections[1].footer.is_linked_to_previous = False
+        add_page_numbers(document.sections[1].footer.paragraphs[0])
+        add_table_of_content(paragraph)
 
     sections = document.sections
     for section in sections:
