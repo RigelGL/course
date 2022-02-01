@@ -152,7 +152,7 @@ def add_active_passive_table(active_passive):
     table.allow_autofit = True
     for i, e in enumerate(['АКТИВ', 'руб', 'ПАССИВ', 'руб']):
         table.cell(0, i).paragraphs[0].add_run(e)
-        table.cell(0, i).width = Cm(5.75 if i % 2 == 0 else 3.25)
+        table.cell(0, i).width = Cm(5.2 if i % 2 == 0 else 3.25)
 
     tbl = active_passive.to_table()
 
@@ -196,7 +196,7 @@ def add_employee_structure_table(data):
         [[e.name, str(e.amount), fn(e.data, 0), 0, fn(round(e.data / 12), 0), '', ''] for e in data.vpr.rows] +
         [['Рабочий', str(data.R_opr), fn(data.opr_salary), fn(data.opr_extra, 0),
           fn(round(data.opr_salary / 12), 0), 'ОПР', 'Сдельная']],
-        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(2.25), Cm(3), Cm(2.0), Cm(2.1)],
+        [Cm(3.7), Cm(1.75), Cm(2.5), Cm(1.75), Cm(2.75), Cm(2.0), Cm(2.1)],
         style=table_style_12
     )
 
@@ -223,7 +223,7 @@ def add_employee_salary_table(data):
         [[e.name, str(e.amount), fn(e.data * 12, 0), 0, fn(e.data, 0), fn(e.amount * e.data * 13)] for e in data.vpr.rows] +
         [['Рабочий', str(data.R_opr), fn(data.opr_salary * 12, 0), fn(data.opr_extra * 12, 0),
           fn(data.opr_salary, 0), fn(data.FOT_opr + data.FOT_opr_extra, 0)]],
-        [Cm(3.7), Cm(2), Cm(2.15), Cm(2.7), Cm(3), Cm(3), Cm(2.5)],
+        [Cm(3.7), Cm(2), Cm(2.15), Cm(2.15), Cm(2.5), Cm(3)],
         style=table_style_12
     )
     r = table.add_row()
@@ -245,20 +245,20 @@ def add_production_calculation_table(direct: DirectCosts, indirect: WorkAndOther
     table = add_table([
         ['Статья затрат', 'Сумма, руб./шт.', '%'],
         ['Прямые затраты', None, None],
-        ['    материалы и комплектующие изделия', fn(direct.materials_i_comp), '0'],
-        ['    заработная плата ОРП', fn(direct.FOT), '0'],
-        ['    страховые взносы', fn(direct.FOT_fee), '0'],
-        ['    амортизация', fn(direct.amortisation), '0'],
-        ['Итого прямые затраты', fn(direct.direct), '0'],
+        ['    материалы и комплектующие изделия', fn(direct.materials_i_comp), fn(direct.materials_i_comp / full * 100, 1)],
+        ['    заработная плата ОРП', fn(direct.FOT), fn(direct.FOT / full * 100, 1)],
+        ['    страховые взносы', fn(direct.FOT_fee), fn(direct.FOT_fee / full * 100, 1)],
+        ['    амортизация', fn(direct.amortisation), fn(direct.amortisation / full * 100, 1)],
+        ['Итого прямые затраты', fn(direct.direct), fn(direct.direct / full * 100, 1)],
         [None, None, None],
         ['Косвенные затраты', None, None],
-        ['    связанные с работой оборудования', fn(indirect.work), '0'],
-        ['    не связанные с работой оборудования', fn(indirect.other), '0'],
-        ['Итого косвенные затраты', fn(indirect.total), '0'],
+        ['    связанные с работой оборудования', fn(indirect.work), fn(indirect.work / full * 100, 1)],
+        ['    не связанные с работой оборудования', fn(indirect.other), fn(indirect.other / full * 100, 1)],
+        ['Итого косвенные затраты', fn(indirect.total), fn(indirect.total / full * 100, 1)],
         [None, None, None],
-        ['Производственная себестоимость', fn(direct.direct + indirect.total), '0'],
-        ['Коммерческие затраты', fn(kom), '0'],
-        ['Полная себестоимость изделия', fn(full), '0']
+        ['Производственная себестоимость', fn(direct.direct + indirect.total), fn((direct.direct + indirect.total) / full * 100, 1)],
+        ['Коммерческие затраты', fn(kom), fn(kom / full * 100, 1)],
+        ['Полная себестоимость изделия', fn(full), '100']
     ], [Cm(9), Cm(5), Cm(2)], style=table_style_12_dense, first_bold=True)
     return table
 
@@ -404,7 +404,7 @@ class Chapter_1:
             return numerator / denominator
 
         self.T_pl = 365
-        self.B = 128
+        self.B = 118
         self.C = 2
         self.D = 8
         self.O = 20
@@ -1022,7 +1022,7 @@ class Chapter_2_1:
         self.N_pl_B = initial_data.N_pl - self.N_pl_A - self.N_pl_C
 
         self.T_pl = 365
-        self.B = 128
+        self.B = 118
         self.C = 2
         self.D = 8
         self.O = 20
@@ -1152,7 +1152,7 @@ class Chapter_2_3:
         self.R_vpr = self.vpr.total
         self.R_sl = self.sl.total
 
-        self.C_opr_mean = round(12 * self.opr_salary / self.F_rab_ef, 2)
+        self.C_opr_mean = 12 * self.opr_salary / self.F_rab_ef
 
         self.FOT_opr = self.C_opr_mean * self.total_time
         self.FOT_opr_extra = self.R_opr * (self.opr_extra * 12 + self.stimulating_salary_percent * self.opr_salary)
@@ -1445,7 +1445,6 @@ class Chapter_2_7:
         'S_nalogi',
         'P_chistaya_real_ost',
         'to_sell',
-        'P_solt_chistatya',
         'S_sell_OS',
         'adding',
         'subbing',
@@ -1468,9 +1467,8 @@ class Chapter_2_7:
                 costs += r['cost'] * (i['stock'] - i['need_fact'])
                 self.to_sell.add_row(r['name'], i['stock'] - i['need_fact'], round(r['cost'] * (1 - chapter_3.OS_amortisation_percent), 2))
         self.S_sell_OS = round(costs * (1 - chapter_3.OS_amortisation_percent), 2)
-        self.P_solt_chistatya = round(self.S_sell_OS * (1 - chapter_7.tax), 2)
 
-        self.adding = self.P_chistaya_real_ost + self.P_solt_chistatya
+        self.adding = self.P_chistaya_real_ost + self.S_sell_OS
         self.subbing = chapter_2_2.S_os - chapter_1.S_os + chapter_3.costs["amortisation OS"].total
 
         ap = self.active_passive = ExtendedActivePassive('end I', 'buy TO', 'buy OS', 'sell ost', 'sell TO', 'begin II')
@@ -1516,8 +1514,8 @@ class Chapter_2_7:
 
         sell_TO = ap['sell TO']
         sell_TO.set(sell_ost.active, sell_ost.passive)
-        sell_TO.active.K_ob_ds += self.P_solt_chistatya
-        sell_TO.passive.neraspred_pribil += self.P_solt_chistatya
+        sell_TO.active.K_ob_ds += self.S_sell_OS
+        sell_TO.active.OS -= self.S_sell_OS
         free_ds = max(sell_TO.active.K_ob_ds - 500_000, 0)
         zaem_left = max(0, sell_TO.passive.kratkosroch_zaem_sredstva - free_ds)
         sell_TO.active.K_ob_ds -= max(0, sell_TO.passive.kratkosroch_zaem_sredstva - zaem_left)
@@ -1684,9 +1682,9 @@ class Chapter_2_8:
         self.variable_cost_price_B = round(self.S_B_poln.variable * (1 + self.k_nats_variable), 2)
         self.variable_cost_price_C = round(self.S_C_poln.variable * (1 + self.k_nats_variable), 2)
 
-        self.TS_A_plan = max(self.param_price_A, self.total_cost_price_A, self.variable_cost_price_A)
-        self.TS_B_plan = max(self.param_price_B, self.total_cost_price_B, self.variable_cost_price_B)
-        self.TS_C_plan = max(self.param_price_C, self.total_cost_price_C, self.variable_cost_price_C)
+        self.TS_A_plan = round(sum([self.param_price_A, self.total_cost_price_A, self.variable_cost_price_A]) / 3, 2)
+        self.TS_B_plan = round(sum([self.param_price_B, self.total_cost_price_B, self.variable_cost_price_B]) / 3, 2)
+        self.TS_C_plan = round(sum([self.param_price_C, self.total_cost_price_C, self.variable_cost_price_C]) / 3, 2)
 
 
 class Chapter_2_9:
@@ -1966,7 +1964,7 @@ def gen_1_1():
     dp('Найдём эффективный фонд времени работы оборудования')
     add_formula_with_description('F_{об.эф.} = (A - B) \\cdot C \\cdot D \\cdot (1-γ)', [
         ['A', f'число календарных дней в рассматриваемом периоде = {chapter.T_pl}'],
-        ['B', f'число выходных и праздничных дней (выбрать в соответствии с рассматриваемым периодом) = {chapter.B}'],
+        ['B', f'число выходных и праздничных дней = {chapter.B}'],
         ['C', f'число смен в сутки = {chapter.C}'],
         ['D', f'число часов в одной смене = {chapter.D}'],
         ['γ', f'планируемые простои оборудования в долях единицы = {chapter.gamma}'],
@@ -2588,7 +2586,7 @@ def gen_1_8():
         [None, 'план', 'факт'],
         ['Выручка', fn(chapter_8.Q_plan), fn(chapter_8.Q_fact)],
         ['Себестоимость продаж (проданной готовой продукции)', fn(chapter_8.S_pr_got_pr_plan), fn(chapter_8.S_pr_got_pr_fact)],
-        ['Валовая прибыль (убыток)', fn(chapter_8.S_valovaya_plan), fn(chapter_8.S_pr_got_pr_fact)],
+        ['Валовая прибыль (убыток)', fn(chapter_8.S_valovaya_plan), fn(chapter_8.S_valovaya_fact)],
         ['Коммерческие расходы', fn(chapter_8.S_kom_plan), fn(chapter_8.S_kom_fact)],
         ['Прибыль (убыток) от продаж', fn(chapter_8.P_pr_plan), fn(chapter_8.P_pr_fact)],
         ['Прочие доходы ', fn(0), fn(0)],
@@ -2725,7 +2723,7 @@ def gen_1_10():
 
         dp('Выработка продукции на одного работника:')
         add_formula('V = \\frac{Объём\\ продукции}{Среднесписочное\\ кол-во\\ ППП} = \\frac{' +
-                    f'{fn(initial_data.N_pl, 0)} }}{{ {fn(chapter_2.R_ppp, 0)} }} = {fn(chapter_10.V)}\\ [шт./работн.год]', style=formula_style_12)
+                    f'{fn(initial_data.N_pl, 0)} }}{{ {fn(chapter_2.R_ppp, 0)} }} = {fn(chapter_10.V)}\\ [шт./чел.год]', style=formula_style_12)
 
         dp()
         dp('Среднегодовая стоимость ОПФ:')
@@ -2810,11 +2808,11 @@ def gen_1_10():
             ['Коэффициент текущей ликвидности', fn(chapter_10.k_tek_likvid_plan), fn(chapter_10.k_tek_likvid_fact)],
             ['Выручка от продажи продукции, [руб.]', fn(chapter_8.Q_plan), fn(chapter_8.Q_fact)],
             ['Нераспределенная прибыль, [руб.]', fn(chapter_9.active_passive_plan.neraspred_pribil), fn(chapter_9.active_passive_fact.neraspred_pribil)],
-            ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_10.V), fn(chapter_10.V)],
+            ['Выработка продукции на одного работника [шт./чел.год]', fn(chapter_10.V), fn(chapter_10.V)],
             ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_10.OS_year_mean), fn(chapter_10.OS_year_mean)],
             ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_10.k_FO_plan), fn(chapter_10.k_FO_fact)],
             ['Коэффициент фондоемкости [руб.]', fn(chapter_10.k_FE_plan), fn(chapter_10.k_FE_fact)],
-            ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_sr_year_mean_plan), fn(chapter_10.Z_ob_sr_year_mean_fact)],
+            ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_plan), fn(chapter_10.Z_ob_fact)],
             ['Оборачиваемость собственного капитала', fn(chapter_10.k_oborach_sobstv_capital_plan), fn(chapter_10.k_oborach_sobstv_capital_fact)],
             ['Рентабельность продукции', fn(chapter_10.R_production_plan), fn(chapter_10.R_production_fact)],
             ['Рентабельность продаж', fn(chapter_10.R_sell_plan), fn(chapter_10.R_sell_fact)],
@@ -2835,7 +2833,7 @@ def gen_1_10():
     add_formula('S_{Б\\ перем}}', p)
     p.add_run(' может меняться от объёма продукции (см п. 4.3), поэтому воспользуемся иной формулой:')
     add_formula('N_{кр} \\cdot {Ц_{Б\\ произв\\ план} = S_{сум}(N_{кр})')
-    add_formula('Q_{кр} = N_{кр} \\cdot {Ц_{Б\\ произв\\ план}} = ' + f'{fn(chapter_10.N_kr, 0)} \\cdot {chapter_7.P_proizv_plan} = {fn(chapter_10.Q_kr)}')
+    add_formula('Q_{кр} = N_{кр} \\cdot {Ц_{Б\\ произв\\ план}} = ' + f'{fn(chapter_10.N_kr, 0)} \\cdot {fn(chapter_7.P_proizv_plan)} = {fn(chapter_10.Q_kr)}')
     dp('Решение найдём итеративно, с помощью бинарного поиска:')
     add_formula('N_{кр} = ' + f'{fn(chapter_10.N_kr, 0)}')
 
@@ -2853,8 +2851,8 @@ def gen_1_10():
     dp()
     dp('Запас финансовой прочности:')
     add_formula('Q_{фин\\ пр.} = \\frac{Q - Q_{кр}}{Q} \\cdot 100%')
-    add_formula('Q_{фин\\ пр.\\ план} = \\frac{ ' + f'{fn(chapter_8.Q_plan)} - {chapter_10.Q_kr} }}{{ {fn(chapter_8.Q_plan)} }} = {fn(chapter_10.Q_fin_pr_plan)}')
-    add_formula('Q_{фин\\ пр.\\ факт} = \\frac{ ' + f'{fn(chapter_8.Q_fact)} - {chapter_10.Q_kr} }}{{ {fn(chapter_8.Q_fact)} }} = {fn(chapter_10.Q_fin_pr_fact)}')
+    add_formula('Q_{фин\\ пр.\\ план} = \\frac{ ' + f'{fn(chapter_8.Q_plan)} - {chapter_10.Q_kr} }}{{ {fn(chapter_8.Q_plan)} }} = {fn(chapter_10.Q_fin_pr_plan * 100)} \\%')
+    add_formula('Q_{фин\\ пр.\\ факт} = \\frac{ ' + f'{fn(chapter_8.Q_fact)} - {chapter_10.Q_kr} }}{{ {fn(chapter_8.Q_fact)} }} = {fn(chapter_10.Q_fin_pr_fact * 100)} \\%')
 
     dp()
     dp('Найдём эффект производственного рычага:')
@@ -2988,7 +2986,7 @@ def gen_2_2():
         ] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_A.rows)] +
         [['Изделие Б', None, None, None]] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_B.rows)] +
         [['Изделие В', None, None, None]] + [[str(i + 1), e['name'], fn(e['cost'] // 1000, 0), fn(e['time'])] for i, e in enumerate(initial_data.operations_C.rows)],
-        [Cm(3), Cm(3.6), Cm(6.4), Cm(4.5)], True
+        [Cm(3), Cm(3.6), Cm(6.4), Cm(3.5)], True
     )
     table.cell(1, 0).merge(table.cell(1, 3)).paragraphs[0].runs[0].bold = True
     table.cell(2 + len(initial_data.operations_A), 0).merge(
@@ -3018,14 +3016,14 @@ def gen_2_2():
           fn(e['need_fact'], 0),
           fn(e['stock'], 0),
           fn(e['need_new'], 0),
-          fn(e['cost'] * e['need_new']),
+          fn(e['cost'] * e['need_new'], 0),
           fn(e['b_fact'])] for e in chapter_2_2.machines.rows] +
         [['Итого', None,
           fn(chapter_2_2.machines.calculate_sum(lambda x: x['need_fact']), 0),
           fn(chapter_2_2.machines.calculate_sum(lambda x: x['stock']), 0),
           fn(chapter_2_2.machines.calculate_sum(lambda x: x['need_new']), 0),
-          fn(chapter_2_2.new_machines_cost), None]],
-        [Cm(3.2), Cm(1.75), Cm(1.75), Cm(3), Cm(3), Cm(3.25), Cm(2)], style=table_style_12)
+          fn(chapter_2_2.new_machines_cost, 0), None]],
+        [Cm(3.2), Cm(1.75), Cm(1.75), Cm(2.75), Cm(2.75), Cm(2.75), Cm(2)], style=table_style_12)
     add_formula('n_{об.i_{расч.}}', table.cell(1, 1).paragraphs[0])
     add_formula('n_{об.i_{прин.}}', table.cell(1, 2).paragraphs[0])
     table.cell(0, 0).merge(table.cell(1, 0))
@@ -3052,8 +3050,8 @@ def gen_2_2():
           fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost II begin']), 0),
           fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['delta']), 0),
           fn(chapter_2_2.main_resources.filter_table(lambda x: len(x['n']) > 0).calculate_sum(lambda x: x['cost II']), 0),
-          None]],
-        [Cm(0.7), Cm(3.8), Cm(2.25), Cm(2.25), Cm(2.25), Cm(2.25), Cm(3.25), Cm(1.0)],
+          '100']],
+        [Cm(0.7), Cm(3.25), Cm(2.25), Cm(2), Cm(2.25), Cm(2), Cm(3.25), Cm(1.0)],
         first_bold=True, style=table_style_10
     )
     table.cell(len(table.rows) - 1, 0).merge(table.cell(len(table.rows) - 1, 1))
@@ -3093,8 +3091,13 @@ def gen_2_3():
     add_formula('R_{СЛ} = ' + fn(chapter_2_3.R_sl / chapter_2_3.R_opr) + 'R_{ОПР} = ' + f'{chapter_2_3.R_sl}')
 
     dp('Численность ППП:')
-    p = add_formula('R_{ППП} = R_{ОПР} + R_{ВПР} + R_{СЛ} = ' + f'{chapter_2_3.R_opr} + {chapter_2_3.R_vpr} + {chapter_2_3.R_sl} = {chapter_2_3.R_ppp}')
-    p.runs[0].add_break(WD_BREAK.PAGE)
+    add_formula('R_{ППП} = R_{ОПР} + R_{ВПР} + R_{СЛ} = ' + f'{chapter_2_3.R_opr} + {chapter_2_3.R_vpr} + {chapter_2_3.R_sl} = {chapter_2_3.R_ppp}')
+
+    dp('Средняя тарифная ставка:')
+    add_formula('С_{тар.\\ ст.} = \\frac{12 \\cdot ' + f'{fn(chapter_2_3.opr_salary)} }}{{ {fn(chapter_2_3.F_rab_ef)} }} = {fn(chapter_2_3.C_opr_mean)}')
+    chapter_2_3.FOT_opr
+
+    document.add_page_break()
 
     dp('Таблица 23.1, состав, структура и заработная плата персонала', table_name_text)
     add_employee_structure_table(chapter_2_3)
@@ -3233,7 +3236,7 @@ def gen_2_4():
 
 
 def gen_2_5():
-    dp('5. Расчет прямых  и косвенных затрат', title_text)
+    dp('5. Расчет прямых и косвенных затрат', title_text)
     dp('Деление затрат на прямые и косвенные произведем с целью их распределения между единицами калькулирования и исчисления фактической себестоимости каждой единицы.')
     dp()
     dp('5.1 Расчет прямых затрат по каждому изделию А, Б и В', subtitle_text)
@@ -3260,7 +3263,24 @@ def gen_2_5():
     document.add_page_break()
     dp('Таблица 25.1.1, прямые затраты по изделиям А, Б и В', table_name_text)
     table = add_table([
-        ['Изделие', 'А руб/год', 'Б руб/год', 'В руб/год'],
+        ['Изделие', 'А, руб/год', 'Б, руб/год', 'В, руб/год'],
+        ['Материалы', fn(chapter_2_4.S_materials_i_comp_A * chapter_2_1.N_pl_A),
+         fn(chapter_2_4.S_materials_i_comp_B * chapter_2_1.N_pl_B), fn(chapter_2_4.S_materials_i_comp_C * chapter_2_1.N_pl_C)],
+        ['Заработная плата ОПР', fn(chapter_2_5.direct_A.FOT * chapter_2_1.N_pl_A),
+         fn(chapter_2_5.direct_B.FOT * chapter_2_1.N_pl_B), fn(chapter_2_5.direct_C.FOT * chapter_2_1.N_pl_C)],
+        ['Страховые взносы', fn(chapter_2_5.direct_A.FOT_fee * chapter_2_1.N_pl_A),
+         fn(chapter_2_5.direct_B.FOT_fee * chapter_2_1.N_pl_B), fn(chapter_2_5.direct_C.FOT_fee * chapter_2_1.N_pl_C)],
+        ['Амортизация по основным средствам, используемые при производстве продукции', fn(chapter_2_5.direct_A.amortisation * chapter_2_1.N_pl_A),
+         fn(chapter_2_5.direct_B.amortisation * chapter_2_1.N_pl_B), fn(chapter_2_5.direct_C.amortisation * chapter_2_1.N_pl_C)],
+        ['Суммарные прямые затраты по изделиям', fn(chapter_2_5.direct_A.direct * chapter_2_1.N_pl_A),
+         fn(chapter_2_5.direct_B.direct * chapter_2_1.N_pl_B), fn(chapter_2_5.direct_C.direct * chapter_2_1.N_pl_C)],
+        ['Суммарные прямые затраты', fn(chapter_2_5.direct_total), None, None]
+    ], [Cm(7), Cm(3), Cm(3), Cm(3)], first_bold=True)
+    table.cell(6, 1).merge(table.cell(6, 3))
+
+    dp('Таблица 25.1.1, прямые удельные затраты по изделиям А, Б и В', table_name_text)
+    table = add_table([
+        ['Изделие', 'А, руб', 'Б, руб', 'В, руб'],
         ['Материалы', fn(chapter_2_4.S_materials_i_comp_A), fn(chapter_2_4.S_materials_i_comp_B), fn(chapter_2_4.S_materials_i_comp_C)],
         ['Заработная плата ОПР', fn(chapter_2_5.direct_A.FOT), fn(chapter_2_5.direct_B.FOT), fn(chapter_2_5.direct_C.FOT)],
         ['Страховые взносы', fn(chapter_2_5.direct_A.FOT_fee), fn(chapter_2_5.direct_B.FOT_fee), fn(chapter_2_5.direct_C.FOT_fee)],
@@ -3323,14 +3343,14 @@ def gen_2_5():
              fn(chapter_2_5.indirect.calculate_sum(lambda x: x['cost'].other * (len(x['n']) > 0)))],
             ['Суммарные косвенные расходы', fn(sm), None]
         ],
-        [Cm(9), Cm(4.25), Cm(4.25)], first_bold=True
+        [Cm(8), Cm(4.25), Cm(4.25)], first_bold=True
     )
     table.rows[-1].cells[1].merge(table.rows[-1].cells[2])
     document.add_page_break()
 
     dp('5.4 Распределение косвенных затрат по изделиям А, Б и В', subtitle_text)
     dp('При распределении косвенных затрат по изделиям будем придерживаться определенного порядка:')
-    dp('Косвенные затраты, связанные с работой оборудования, распределим пропорционально машино-часам, затраченным  на обработку годового объема '
+    dp('Косвенные затраты, связанные с работой оборудования, распределим пропорционально машино-часам, затраченным на обработку годового объема '
        'выпуска каждого изделия, определив предварительно стоимость одного машино-часа.')
 
     add_formula_with_description(
@@ -3349,7 +3369,7 @@ def gen_2_5():
         ('Б', chapter_2_1.N_pl_B, chapter_2_5.machine_time_B, chapter_2_5.S_sv_s_rab_ob_B),
         ('B', chapter_2_1.N_pl_C, chapter_2_5.machine_time_C, chapter_2_5.S_sv_s_rab_ob_C)
     ]:
-        add_formula(f'S^{j}_{{св.\\ с\\ раб.об}} = N_{{пл.\\ {j} }} \\cdot t\'_{j} \\cdot S_{{м-ч}} = {fn(n, 0)} \\cdot {fn(v)} \\cdot {fn(chapter_2_5.S_m_ch)} = {fn(g)}')
+        add_formula(f'S^{j}_{{св.\\ с\\ раб.об}} = N_{{пл.\\ {j} }} \\cdot t\'_{j} \\cdot S_{{м-ч}} = {fn(n, 0)} \\cdot {fn(v)} \\cdot {fn(chapter_2_5.S_m_ch)} = {fn(g)}\\ [руб.]')
 
     dp()
     dp('Косвенные затраты, не связанные с работой оборудования, распределим пропорционально основной заработной плате основных производственных рабочих и расходам '
@@ -3367,7 +3387,7 @@ def gen_2_5():
         ('B', chapter_2_1.N_pl_C, chapter_2_5.direct_C.FOT, chapter_2_5.S_sv_s_rab_ob_C, chapter_2_5.S_ne_sv_s_rab_ob_C)
     ]:
         add_formula(f'S^{j}_{{не\\ св.\\ с\\ раб.об}} = (L^{j}_{{ОПР}} + S^{j}_{{св.\\ с\\ раб.об.}}) \\cdot k_{{косв}} = ({fn(n * v, 0)} +'
-                    f' {fn(s)} ) \\cdot {fn(chapter_2_5.k_kosv)} = {fn(g)}', style=formula_style_12)
+                    f' {fn(s)} ) \\cdot {fn(chapter_2_5.k_kosv)} = {fn(g)}\\ [руб.]', style=formula_style_12)
 
     document.add_page_break()
 
@@ -3383,7 +3403,8 @@ def gen_2_5():
     dp('Таблица 25.5.2, калькуляция изделия Б')
     add_production_calculation_table(chapter_2_5.direct_B, chapter_2_5.S_rab_ob_B, chapter_2_4.S_kom.total * chapter_2_1.B_percent / (max(1, chapter_2_1.N_pl_B)))
 
-    dp()
+    document.add_page_break()
+
     dp('Таблица 25.5.3, калькуляция изделия В')
     add_production_calculation_table(chapter_2_5.direct_C, chapter_2_5.S_rab_ob_C, chapter_2_4.S_kom.total * chapter_2_1.C_percent / (max(1, chapter_2_1.N_pl_C)))
 
@@ -3391,7 +3412,7 @@ def gen_2_5():
 
 
 def gen_2_6():
-    dp('6. Планирование потребности в оборотных  средствах на второй период', title_text)
+    dp('6. Планирование потребности в оборотных средствах на второй период', title_text)
     dp('Расчёт аналогичен пункту 5 раздела I')
 
     dp('Таблица 26.1, норма запаса материалов для изделия А', table_name_text)
@@ -3601,6 +3622,8 @@ def gen_2_8():
     dp('Таблица 28.3.2, условно-постоянные и переменные затраты для изделия Б', table_name_text)
     add_const_and_variable_costs_table(chapter_2_8.S_B_sum, chapter_2_8.S_B_sum['fot'], chapter_2_8.S_B_sum['fot fee'], style=table_style_12_dense)
 
+    document.add_page_break()
+
     dp('Таблица 28.3.3, условно-постоянные и переменные затраты для изделия В', table_name_text)
     add_const_and_variable_costs_table(chapter_2_8.S_C_sum, chapter_2_8.S_C_sum['fot'], chapter_2_8.S_C_sum['fot fee'], style=table_style_12_dense)
 
@@ -3614,8 +3637,8 @@ def gen_2_8():
     ]:
         add_formula(f'Ц_{{ {n}\\ перем\\ затр}} = {fn(p)} \\cdot (1 + {fn(chapter_2_8.k_nats_variable)}) = {fn(pr)}')
 
-    document.add_page_break()
-
+    dp()
+    dp()
     dp('8.4. Установленные цены изделий А, Б и В', subtitle_text)
     dp('Полученные результаты в пунктах 8.1, 8.2 и 8.3 отразим в таблице:')
     dp('Таблица 28.4.1, итоговые результаты ценообразования, полученные разными методами', table_name_text)
@@ -3631,7 +3654,7 @@ def gen_2_8():
     textDirection.set(ns.qn('w:val'), 'btLr')  # btLr tbRl
     table.cell(0, 0)._tc.get_or_add_tcPr().append(textDirection)
 
-    dp('В качестве установленной цены примем максимальную из полученных')
+    dp('В качестве установленной цены примем среднюю из полученных').add_run().add_break(WD_BREAK.PAGE)
 
 
 def gen_2_9():
@@ -3680,19 +3703,20 @@ def gen_2_10():
                 f'{fn(chapter_2_9.P_chistaya_plan)} - ({fn(chapter_2_6.K_ob_nez_pr)} + {fn(chapter_2_9.K_ob_got_prod_plan)}) = {fn(chapter_2_10.K_den_sr_plan)}', style=formula_style_12)
 
     dp()
-    if chapter_2_10.valid_to_cope_kz_plan == 'full':
-        dp('Возможно полное погашение краткосрочных заёмных средств для плановой суммы денежных средств:')
-        add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' +
-                    f'{fn(chapter_2_10.K_den_sr_plan)} - {fn(chapter_2_7.active_passive["begin II"].passive.kratkosroch_zaem_sredstva)} = {fn(chapter_2_10.K_den_sr_konez_plan)}\\ [руб.]',
-                    style=formula_style_12)
-    elif chapter_2_10.valid_to_cope_kz_plan == 'part':
-        dp('Возможно частичное погашение краткосрочных заёмных средств для плановой суммы '
-           'денежных средств (дальнейшая генерация неверна):').runs[0].font.color.rgb = RGBColor(255, 0, 0)
-        add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' + f'{fn(500_000)} \\ [руб.]')
-        add_formula('S_{кр.заёмн.ср.\\ план} = ' + f'{fn(chapter_2_10.S_kratkosroch_zaem_sredstva_konez_plan)} \\ [руб.]')
-    else:
-        dp('Погашение краткосрочных заёмных средств невозможно для плановой суммы денежных средств, '
-           'дальнейшая генерация неверна.').runs[0].font.color.rgb = RGBColor(255, 0, 0)
+    if chapter_2_7.active_passive['begin II'].passive.kratkosroch_zaem_sredstva > 0:
+        if chapter_2_10.valid_to_cope_kz_plan == 'full':
+            dp('Возможно полное погашение краткосрочных заёмных средств для плановой суммы денежных средств:')
+            add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' +
+                        f'{fn(chapter_2_10.K_den_sr_plan)} - {fn(chapter_2_7.active_passive["begin II"].passive.kratkosroch_zaem_sredstva)} = {fn(chapter_2_10.K_den_sr_konez_plan)}\\ [руб.]',
+                        style=formula_style_12)
+        elif chapter_2_10.valid_to_cope_kz_plan == 'part':
+            dp('Возможно частичное погашение краткосрочных заёмных средств для плановой суммы '
+               'денежных средств (дальнейшая генерация неверна):').runs[0].font.color.rgb = RGBColor(255, 0, 0)
+            add_formula('K_{ден.ср.конец\\ план} = K_{ден.ср.\\ план} - S_{кр.заёмн.ср.} = ' + f'{fn(500_000)} \\ [руб.]')
+            add_formula('S_{кр.заёмн.ср.\\ план} = ' + f'{fn(chapter_2_10.S_kratkosroch_zaem_sredstva_konez_plan)} \\ [руб.]')
+        else:
+            dp('Погашение краткосрочных заёмных средств невозможно для плановой суммы денежных средств, '
+               'дальнейшая генерация неверна.').runs[0].font.color.rgb = RGBColor(255, 0, 0)
 
     document.add_page_break()
 
@@ -3750,7 +3774,7 @@ def gen_2_11():
 
         dp('Выработка продукции на одного работника:')
         add_formula('V = \\frac{Объём\\ продукции}{Среднесписочное\\ кол-во\\ ППП} = \\frac{' +
-                    f'{fn(initial_data.N_pl, 0)} }}{{ {fn(chapter_2_3.R_ppp, 0)} }} = {fn(chapter_2_11.V)}\\ [шт./работн.год]', style=formula_style_12)
+                    f'{fn(initial_data.N_pl, 0)} }}{{ {fn(chapter_2_3.R_ppp, 0)} }} = {fn(chapter_2_11.V)}\\ [шт./чел.год]', style=formula_style_12)
 
         dp()
         dp('Среднегодовая стоимость ОПФ:')
@@ -3816,11 +3840,11 @@ def gen_2_11():
             ['Коэффициент текущей ликвидности', fn(chapter_2_11.k_tek_likvid_plan)],
             ['Выручка от продажи продукции, [руб.]', fn(chapter_2_9.Q_plan)],
             ['Нераспределенная прибыль, [руб.]', fn(chapter_2_10.active_passive_plan.neraspred_pribil)],
-            ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_2_11.V)],
+            ['Выработка продукции на одного работника [шт./чел.год]', fn(chapter_2_11.V)],
             ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_2_11.OS_year_mean)],
             ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_2_11.k_FO_plan), ],
             ['Коэффициент фондоемкости [руб.]', fn(chapter_2_11.k_FE_plan)],
-            ['Число оборотов оборотных средств, [раз/год]', fn(chapter_2_11.Z_ob_sr_year_mean_plan)],
+            ['Число оборотов оборотных средств, [раз/год]', fn(chapter_2_11.Z_ob_plan)],
             ['Оборачиваемость собственного капитала', fn(chapter_2_11.k_oborach_sobstv_capital_plan)],
             ['Рентабельность продукции', fn(chapter_2_11.R_production_plan)],
             ['Рентабельность продаж', fn(chapter_2_11.R_sell_plan)],
@@ -3844,12 +3868,14 @@ def gen_2_11():
         def gen_2_11_2_A():
             dp('11.2.1 для изделия А', subtitle_2_text)
             dp('Точка безубыточности:')
-            add_formula('N_{кр\\ A} = \\frac{' + f'{fn(chapter_2_8.S_A_sum.const)} }}{{ {fn(chapter_2_8.TS_A_plan)} - {fn(chapter_2_8.S_A_poln.variable)} }} = {fn(chapter_2_11.N_kr_A, 0)}')
-            add_formula('Q_{кр\\ A} = N_{кр\\ A} \\cdot Ц_{A\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_A)}')
+            add_formula('N_{кр\\ A} = \\frac{' +
+                        f'{fn(chapter_2_8.S_A_sum.const)} }}{{ {fn(chapter_2_8.TS_A_plan)} - {fn(chapter_2_8.S_A_poln.variable)} }} = {fn(chapter_2_11.N_kr_A, 0)}\\ [шт./год]')
+            add_formula('Q_{кр\\ A} = N_{кр\\ A} \\cdot Ц_{A\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_A)}\\ [руб.]')
             dp('Коэффициент покрытия:')
             add_formula('k_{покр\\ A} = \\frac{' + f'{fn(chapter_2_8.TS_A_plan)} - {fn(chapter_2_8.S_A_poln.variable)} }}{{ {fn(chapter_2_8.TS_A_plan)} }} = {fn(chapter_2_11.k_pokr_A)}')
             dp('Запас финансовой прочности:')
-            add_formula('Q_{фин\\ пр.\\ A} = \\frac{' + f'{fn(chapter_2_9.Q_plan_A)} - {fn(chapter_2_11.Q_kr_A)} }}{{ {fn(chapter_2_9.Q_plan_A)} }} = {fn(chapter_2_11.Q_fin_pr_A * 100)}%')
+            add_formula('Q_{фин\\ пр.\\ A} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_A)} - {fn(chapter_2_11.Q_kr_A)} }}{{ {fn(chapter_2_9.Q_plan_A)} }} = {fn(chapter_2_11.Q_fin_pr_A * 100)}\\%')
 
             dp('Эффект производственного рычага:')
             add_formula('E_{пр.\\ рыч.\\ план\\ А} = \\frac{' +
@@ -3880,18 +3906,20 @@ def gen_2_11():
 
             picP = document.add_paragraph()
             picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_picture(memfile, width=Cm(14))
             picP.add_run().add_break(WD_BREAK.PAGE)
 
         def gen_2_11_2_B():
             dp('11.2.1 для изделия Б', subtitle_2_text)
             dp('Точка безубыточности:')
-            add_formula('N_{кр\\ Б} = \\frac{' + f'{fn(chapter_2_8.S_B_sum.const)} }}{{ {fn(chapter_2_8.TS_B_plan)} - {fn(chapter_2_8.S_B_poln.variable)} }} = {fn(chapter_2_11.N_kr_B, 0)}')
-            add_formula('Q_{кр\\ Б} = N_{кр\\ Б} \\cdot Ц_{Б\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_B)}')
+            add_formula('N_{кр\\ Б} = \\frac{' +
+                        f'{fn(chapter_2_8.S_B_sum.const)} }}{{ {fn(chapter_2_8.TS_B_plan)} - {fn(chapter_2_8.S_B_poln.variable)} }} = {fn(chapter_2_11.N_kr_B, 0)}\\ [шт./год]')
+            add_formula('Q_{кр\\ Б} = N_{кр\\ Б} \\cdot Ц_{Б\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_B)}\\ [руб.]')
             dp('Коэффициент покрытия:')
             add_formula('k_{покр\\ Б} = \\frac{' + f'{fn(chapter_2_8.TS_B_plan)} - {fn(chapter_2_8.S_B_poln.variable)} }}{{ {fn(chapter_2_8.TS_B_plan)} }} = {fn(chapter_2_11.k_pokr_B)}')
             dp('Запас финансовой прочности:')
-            add_formula('Q_{фин\\ пр.\\ Б} = \\frac{' + f'{fn(chapter_2_9.Q_plan_B)} - {fn(chapter_2_11.Q_kr_B)} }}{{ {fn(chapter_2_9.Q_plan_B)} }} = {fn(chapter_2_11.Q_fin_pr_B * 100)}%')
+            add_formula('Q_{фин\\ пр.\\ Б} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_B)} - {fn(chapter_2_11.Q_kr_B)} }}{{ {fn(chapter_2_9.Q_plan_B)} }} = {fn(chapter_2_11.Q_fin_pr_B * 100)}\\%')
 
             dp('Эффект производственного рычага:')
             add_formula('E_{пр.\\ рыч.\\ план\\ Б} = \\frac{' +
@@ -3922,18 +3950,20 @@ def gen_2_11():
 
             picP = document.add_paragraph()
             picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_picture(memfile, width=Cm(14))
             picP.add_run().add_break(WD_BREAK.PAGE)
 
         def gen_2_11_2_C():
             dp('11.2.1 для изделия В', subtitle_2_text)
             dp('Точка безубыточности:')
-            add_formula('N_{кр\\ В} = \\frac{' + f'{fn(chapter_2_8.S_C_sum.const)} }}{{ {fn(chapter_2_8.TS_C_plan)} - {fn(chapter_2_8.S_C_poln.variable)} }} = {fn(chapter_2_11.N_kr_C, 0)}')
-            add_formula('Q_{кр\\ В} = N_{кр\\ В} \\cdot Ц_{В\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_C)}')
+            add_formula('N_{кр\\ В} = \\frac{' +
+                        f'{fn(chapter_2_8.S_C_sum.const)} }}{{ {fn(chapter_2_8.TS_C_plan)} - {fn(chapter_2_8.S_C_poln.variable)} }} = {fn(chapter_2_11.N_kr_C, 0)}\\ [шт./год]')
+            add_formula('Q_{кр\\ В} = N_{кр\\ В} \\cdot Ц_{В\\ произв\\ план} = ' + f'{fn(chapter_2_11.Q_kr_C)}\\ [руб.]')
             dp('Коэффициент покрытия:')
             add_formula('k_{покр\\ В} = \\frac{' + f'{fn(chapter_2_8.TS_C_plan)} - {fn(chapter_2_8.S_C_poln.variable)} }}{{ {fn(chapter_2_8.TS_C_plan)} }} = {fn(chapter_2_11.k_pokr_C)}')
             dp('Запас финансовой прочности:')
-            add_formula('Q_{фин\\ пр.\\ В} = \\frac{' + f'{fn(chapter_2_9.Q_plan_C)} - {fn(chapter_2_11.Q_kr_C)} }}{{ {fn(chapter_2_9.Q_plan_C)} }} = {fn(chapter_2_11.Q_fin_pr_C * 100)}%')
+            add_formula('Q_{фин\\ пр.\\ В} = \\frac{' +
+                        f'{fn(chapter_2_9.Q_plan_C)} - {fn(chapter_2_11.Q_kr_C)} }}{{ {fn(chapter_2_9.Q_plan_C)} }} = {fn(chapter_2_11.Q_fin_pr_C * 100)}\\%')
 
             dp('Эффект производственного рычага:')
             add_formula('E_{пр.\\ рыч.\\ план\\ В} = \\frac{' +
@@ -3964,7 +3994,7 @@ def gen_2_11():
 
             picP = document.add_paragraph()
             picP.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            picP.add_run().add_picture(memfile, width=Cm(12))
+            picP.add_run().add_picture(memfile, width=Cm(14))
             picP.add_run().add_break(WD_BREAK.PAGE)
 
         gen_2_11_2_A()
@@ -3985,12 +4015,14 @@ def gen_2_11():
         ['Коэффициент абсолютной ликвидности', fn(chapter_10.k_abs_likvid_plan), fn(chapter_10.k_abs_likvid_fact), fn(chapter_2_11.k_abs_likvid_plan)],
         ['Коэффициент текущей ликвидности', fn(chapter_10.k_tek_likvid_plan), fn(chapter_10.k_tek_likvid_fact), fn(chapter_2_11.k_tek_likvid_plan)],
         ['Выручка от продажи продукции, [руб.]', fn(chapter_8.Q_plan), fn(chapter_8.Q_fact), fn(chapter_2_9.Q_plan)],
+        ['Прибыль до налогообложения, [руб.]', fn(chapter_8.P_pr_do_nalogov_plan), fn(chapter_8.P_pr_do_nalogov_fact), fn(chapter_2_9.P_pr_do_nalogov_plan)],
+        ['Чистая прибыль, [руб.]', fn(chapter_8.P_chistaya_plan), fn(chapter_8.P_chistaya_fact), fn(chapter_2_9.P_chistaya_plan)],
         ['Нераспределенная прибыль, [руб.]', fn(chapter_9.active_passive_plan.neraspred_pribil), fn(chapter_9.active_passive_fact.neraspred_pribil), fn(chapter_2_10.active_passive_plan.neraspred_pribil)],
-        ['Выработка продукции на одного работника [шт./работн.год]', fn(chapter_10.V), fn(chapter_10.V), fn(chapter_2_11.V)],
+        ['Выработка продукции на одного работника [шт./чел.год]', fn(chapter_10.V), fn(chapter_10.V), fn(chapter_2_11.V)],
         ['Среднегодовая стоимость ОПФ, [руб.]', fn(chapter_10.OS_year_mean), fn(chapter_10.OS_year_mean), fn(chapter_2_11.OS_year_mean)],
         ['Коэффициент фондоотдачи [1/руб.]', fn(chapter_10.k_FO_plan), fn(chapter_10.k_FO_fact), fn(chapter_2_11.k_FO_plan), ],
         ['Коэффициент фондоемкости [руб.]', fn(chapter_10.k_FE_plan), fn(chapter_10.k_FE_fact), fn(chapter_2_11.k_FE_plan)],
-        ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_sr_year_mean_plan), fn(chapter_10.Z_ob_sr_year_mean_fact), fn(chapter_2_11.Z_ob_sr_year_mean_plan)],
+        ['Число оборотов оборотных средств, [раз/год]', fn(chapter_10.Z_ob_plan), fn(chapter_10.Z_ob_fact), fn(chapter_2_11.Z_ob_plan)],
         ['Оборачиваемость собственного капитала', fn(chapter_10.k_oborach_sobstv_capital_plan), fn(chapter_10.k_oborach_sobstv_capital_fact), fn(chapter_2_11.k_oborach_sobstv_capital_plan)],
         ['Рентабельность продукции', fn(chapter_10.R_production_plan), fn(chapter_10.R_production_fact), fn(chapter_2_11.R_production_plan)],
         ['Рентабельность продаж', fn(chapter_10.R_sell_plan), fn(chapter_10.R_sell_fact), fn(chapter_2_11.R_sell_plan)],
@@ -4115,6 +4147,8 @@ if __name__ == '__main__':
 
     sections = document.sections
     for section in sections:
+        section.page_height = Mm(297)
+        section.page_width = Mm(210)
         section.top_margin = Cm(2)
         section.bottom_margin = Cm(2)
         section.left_margin = Cm(3)
